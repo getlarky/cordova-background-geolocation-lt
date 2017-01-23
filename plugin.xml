@@ -24,11 +24,11 @@
      <platform name="ios">
         <!-- required background modes:  App registers for location updates -->        
         <config-file target="*-Info.plist" parent="NSLocationAlwaysUsageDescription">
-            <string>App requires background location tracking</string>
+            <string>Your location is used to provide timely notifications of the perks to which you are entitled.</string>
         </config-file>
 
         <config-file target="*-Info.plist" parent="NSLocationWhenInUseUsageDescription">
-            <string>App requires background location tracking</string>
+            <string>Your location is used to provide timely notifications of the perks to which you are entitled.</string>
         </config-file>
 
         <config-file target="*-Info.plist" parent="UIBackgroundModes">
