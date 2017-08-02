@@ -1,75 +1,76 @@
 package com.transistorsoft.cordova.bggeo;
 
-import java.io.BufferedReader;
+import com.transistorsoft.locationmanager.adapter.BackgroundGeolocation;
+import com.transistorsoft.locationmanager.adapter.TSCallback;
+import com.transistorsoft.locationmanager.location.TSLocationManager;
+import com.transistorsoft.locationmanager.settings.Settings;
+import com.transistorsoft.locationmanager.util.Sensors;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.ByteArrayOutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.List;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
+import java.util.zip.GZIPOutputStream;
+
 import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaPlugin;
-import org.apache.cordova.CordovaWebView;
 import org.apache.cordova.PluginResult;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONException;
 
 import android.Manifest;
+
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Bundle;
 import com.google.android.gms.common.GoogleApiAvailability;
-import com.google.android.gms.location.DetectedActivity;
-import com.transistorsoft.locationmanager.BackgroundGeolocationService;
-import com.transistorsoft.locationmanager.Settings;
-import com.google.android.gms.location.GeofencingEvent;
+
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 
-import de.greenrobot.event.EventBus;
-import de.greenrobot.event.Subscribe;
 import android.app.Activity;
 import android.content.Intent;
-import android.content.SharedPreferences;
-import android.location.Location;
 import android.os.Environment;
 import android.util.Log;
-import android.media.AudioManager;
-import android.media.ToneGenerator;
 import android.widget.Toast;
 
 public class CDVBackgroundGeolocation extends CordovaPlugin {
     private static final String TAG = "TSLocationManager";
-
     public static final String ACCESS_COARSE_LOCATION = Manifest.permission.ACCESS_COARSE_LOCATION;
     public static final String ACCESS_FINE_LOCATION = Manifest.permission.ACCESS_FINE_LOCATION;
+    private static final String[] LOCATION_PERMISSIONS = {ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION};
 
     public static final int REQUEST_ACTION_START = 1;
     public static final int REQUEST_ACTION_GET_CURRENT_POSITION = 2;
-
-
-    private static CordovaWebView gWebView;
-    public static Boolean forceReload = false;
+    public static final int REQUEST_ACTION_START_GEOFENCES = 3;
+    public static final int REQUEST_ACTION_WATCH_POSITION = 4;
+    public static final int REQUEST_ACTION_CONFIGURE = 5;
 
     /**
      * Timeout in millis for a getCurrentPosition request to give up.
      * TODO make configurable.
      */
-    private static final long GET_CURRENT_POSITION_TIMEOUT = 30000;
 
     public static final String ACTION_FINISH            = "finish";
+    public static final String ACTION_START_BACKGROUND_TASK = "startBackgroundTask";
     public static final String ACTION_ERROR             = "error";
     public static final String ACTION_CONFIGURE         = "configure";
     public static final String ACTION_SET_CONFIG        = "setConfig";
+    public static final String ACTION_ADD_LISTENER      = "addListener";
     public static final String ACTION_ADD_MOTION_CHANGE_LISTENER    = "addMotionChangeListener";
     public static final String ACTION_ADD_LOCATION_LISTENER = "addLocationListener";
+    public static final String ACTION_ADD_HEARTBEAT_LISTENER = "addHeartbeatListener";
+    public static final String ACTION_ADD_ACTIVITY_CHANGE_LISTENER = "addActivityChangeListener";
+    public static final String ACTION_ADD_PROVIDER_CHANGE_LISTENER = "addProviderChangeListener";
+    public static final String ACTION_ADD_SCHEDULE_LISTENER = "addScheduleListener";
+    public static final String ACTION_REMOVE_LISTENERS  = "removeListeners";
+
     public static final String ACTION_ON_GEOFENCE       = "onGeofence";
     public static final String ACTION_PLAY_SOUND        = "playSound";
     public static final String ACTION_ACTIVITY_RELOAD   = "activityReload";
@@ -77,55 +78,33 @@ public class CDVBackgroundGeolocation extends CordovaPlugin {
     public static final String ACTION_ADD_HTTP_LISTENER = "addHttpListener";
     public static final String ACTION_GET_LOG           = "getLog";
     public static final String ACTION_EMAIL_LOG         = "emailLog";
+    public static final String ACTION_START_SCHEDULE    = "startSchedule";
+    public static final String ACTION_STOP_SCHEDULE     = "stopSchedule";
 
-    private SharedPreferences settings;
-    private Boolean isStarting          = false;
-    private Boolean isEnabled           = false;
-    private Boolean stopOnTerminate     = false;
-    private Boolean isMoving;
-    private Boolean isAcquiringCurrentPosition = false;
-    private Intent backgroundServiceIntent;
-    private JSONObject mConfig;
-
-    private DetectedActivity currentActivity;
-
-    private CallbackContext startCallback;
-    // Geolocation callback
-    private CallbackContext getLocationsCallback;
-    private CallbackContext syncCallback;
-    private CallbackContext paceChangeCallback;
-    private CallbackContext getGeofencesCallback;
-    private ToneGenerator toneGenerator;
-
-    private List<CallbackContext> locationCallbacks = new ArrayList<CallbackContext>();
-    private List<CallbackContext> motionChangeCallbacks = new ArrayList<CallbackContext>();
-    private List<CallbackContext> geofenceCallbacks = new ArrayList<CallbackContext>();
-    private List<CallbackContext> currentPositionCallbacks = new ArrayList<CallbackContext>();
-    private Map<String, CallbackContext> addGeofenceCallbacks = new HashMap<String, CallbackContext>();
-    private List<CallbackContext> httpResponseCallbacks = new ArrayList<CallbackContext>();
-    private Map<String, CallbackContext> insertLocationCallbacks = new HashMap<String, CallbackContext>();
-    private List<CallbackContext> getCountCallbacks = new ArrayList<CallbackContext>();
-
-    public static boolean isActive() {
-        return gWebView != null;
-    }
+    private List<TSCallback> locationAuthorizationCallbacks = new ArrayList<TSCallback>();
+    private List<CallbackContext> watchPositionCallbacks = new ArrayList<CallbackContext>();
 
     @Override
     protected void pluginInitialize() {
-        gWebView = this.webView;
+        initializeLocationManager();
+    }
 
-        Activity activity = this.cordova.getActivity();
-                
-        settings = activity.getSharedPreferences("TSLocationManager", 0);
-        Settings.init(settings);
-
-        toneGenerator = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100);
-
+    private void initializeLocationManager() {
+        Activity activity   = cordova.getActivity();
         Intent launchIntent = activity.getIntent();
         if (launchIntent.hasExtra("forceReload")) {
-            // When Activity is launched due to forceReload, minimize the app.
             activity.moveTaskToBack(true);
         }
+        getAdapter().on(BackgroundGeolocation.EVENT_PLAY_SERVICES_CONNECT_ERROR, (new TSCallback() {
+            @Override
+            public void success(Object o) {
+                onPlayServicesConnectError((Integer)o);
+            }
+            @Override
+            public void error(Object o) {
+
+            }
+        }));
     }
 
     public boolean execute(String action, JSONArray data, CallbackContext callbackContext) throws JSONException {
@@ -133,17 +112,24 @@ public class CDVBackgroundGeolocation extends CordovaPlugin {
 
         Boolean result      = false;
 
-        if (BackgroundGeolocationService.ACTION_START.equalsIgnoreCase(action)) {
+        if (BackgroundGeolocation.ACTION_START.equalsIgnoreCase(action)) {
             result      = true;
-            if (!isStarting) {
-                this.start(callbackContext);
-            } else {
-                callbackContext.error("- Waiting for previous start action to complete");
-            }
-        } else if (BackgroundGeolocationService.ACTION_STOP.equalsIgnoreCase(action)) {
+            start(callbackContext);
+        } else if (ACTION_START_SCHEDULE.equalsIgnoreCase(action)) {
+            result = true;
+            startSchedule(callbackContext);
+        } else if (ACTION_STOP_SCHEDULE.equalsIgnoreCase(action)) {
+            result = true;
+            stopSchedule(callbackContext);
+        } else if (BackgroundGeolocation.ACTION_START_GEOFENCES.equalsIgnoreCase(action)) {
+            result = true;
+            startGeofences(callbackContext);
+        } else if (BackgroundGeolocation.ACTION_STOP.equalsIgnoreCase(action)) {
             // No implementation to stop background-tasks with Android.  Just say "success"
             result      = true;
-            this.stop();
+            stop(callbackContext);
+        } else if (ACTION_START_BACKGROUND_TASK.equalsIgnoreCase(action)) {
+            result = true;
             callbackContext.success(0);
         } else if (ACTION_FINISH.equalsIgnoreCase(action)) {
             result = true;
@@ -155,903 +141,798 @@ public class CDVBackgroundGeolocation extends CordovaPlugin {
         } else if (ACTION_CONFIGURE.equalsIgnoreCase(action)) {
             result = true;
             configure(data.getJSONObject(0), callbackContext);
+        } else if (ACTION_REMOVE_LISTENERS.equalsIgnoreCase(action)) {
+            result = true;
+            removeListeners(callbackContext);
+        } else if (ACTION_ADD_LISTENER.equalsIgnoreCase(action)) {
+            result = true;
+            addListener(data.getString(0), callbackContext);
         } else if (ACTION_ADD_LOCATION_LISTENER.equalsIgnoreCase(action)) {
             result = true;
             addLocationListener(callbackContext);
-        } else if (BackgroundGeolocationService.ACTION_CHANGE_PACE.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_CHANGE_PACE.equalsIgnoreCase(action)) {
             result = true;
-            if (!isEnabled) {
+            if (!Settings.getEnabled()) {
                 Log.w(TAG, "- Cannot change pace while disabled");
                 callbackContext.error("Cannot #changePace while disabled");
             } else {
                 changePace(callbackContext, data);
             }
-        } else if (BackgroundGeolocationService.ACTION_SET_CONFIG.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_SET_CONFIG.equalsIgnoreCase(action)) {
             result = true;
-            JSONObject config = data.getJSONObject(0);
-            setConfig(config);
-            callbackContext.success();
+            setConfig( data.getJSONObject(0), callbackContext);
         } else if (ACTION_GET_STATE.equalsIgnoreCase(action)) {
             result = true;
-            JSONObject state = this.getState();
-            PluginResult response = new PluginResult(PluginResult.Status.OK, state);
-            response.setKeepCallback(false);
-            callbackContext.sendPluginResult(response);
+            callbackContext.success(Settings.getState());
         } else if (ACTION_ADD_MOTION_CHANGE_LISTENER.equalsIgnoreCase(action)) {
             result = true;
             this.addMotionChangeListener(callbackContext);
-        } else if (BackgroundGeolocationService.ACTION_GET_LOCATIONS.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_GET_LOCATIONS.equalsIgnoreCase(action)) {
             result = true;
             getLocations(callbackContext);
-        } else if (BackgroundGeolocationService.ACTION_SYNC.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_SYNC.equalsIgnoreCase(action)) {
             result = true;
             sync(callbackContext);
-        } else if (BackgroundGeolocationService.ACTION_GET_ODOMETER.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_GET_ODOMETER.equalsIgnoreCase(action)) {
             result = true;
             getOdometer(callbackContext);
-        } else if (BackgroundGeolocationService.ACTION_RESET_ODOMETER.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_SET_ODOMETER.equalsIgnoreCase(action)) {
             result = true;
-            resetOdometer(callbackContext);
-        } else if (BackgroundGeolocationService.ACTION_ADD_GEOFENCE.equalsIgnoreCase(action)) {
+            setOdometer((float) data.getDouble(0), callbackContext);
+        } else if (BackgroundGeolocation.ACTION_ADD_GEOFENCE.equalsIgnoreCase(action)) {
             result = true;
             addGeofence(callbackContext, data.getJSONObject(0));
-        } else if (BackgroundGeolocationService.ACTION_ADD_GEOFENCES.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_ADD_GEOFENCES.equalsIgnoreCase(action)) {
             result = true;
             addGeofences(callbackContext, data.getJSONArray(0));
-        } else if (BackgroundGeolocationService.ACTION_REMOVE_GEOFENCE.equalsIgnoreCase(action)) {
-            result = removeGeofence(data.getString(0));
-            if (result) {
-                callbackContext.success();
-            }  else {
-                callbackContext.error("Failed to add geofence");
-            }
-        } else if (BackgroundGeolocationService.ACTION_REMOVE_GEOFENCES.equalsIgnoreCase(action)) {
-            result = removeGeofences();
-            if (result) {
-                callbackContext.success();
-            }  else {
-                callbackContext.error("Failed to add geofence");
-            }
-        } else if (BackgroundGeolocationService.ACTION_ON_GEOFENCE.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_REMOVE_GEOFENCE.equalsIgnoreCase(action)) {
+            result = true;
+            removeGeofence(data.getString(0), callbackContext);
+        } else if (BackgroundGeolocation.ACTION_REMOVE_GEOFENCES.equalsIgnoreCase(action)) {
+            result = true;
+            removeGeofences(data.getJSONArray(0), callbackContext);
+        } else if (BackgroundGeolocation.ACTION_ON_GEOFENCE.equalsIgnoreCase(action)) {
             result = true;
             addGeofenceListener(callbackContext);
-        } else if (BackgroundGeolocationService.ACTION_GET_GEOFENCES.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_GET_GEOFENCES.equalsIgnoreCase(action)) {
             result = true;
             getGeofences(callbackContext);
         } else if (ACTION_PLAY_SOUND.equalsIgnoreCase(action)) {
             result = true;
-            playSound(data.getInt(0));
+            getAdapter().startTone(data.getInt(0));
             callbackContext.success();
-        } else if (BackgroundGeolocationService.ACTION_GET_CURRENT_POSITION.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_GET_CURRENT_POSITION.equalsIgnoreCase(action)) {
             result = true;
-            JSONObject options = data.getJSONObject(0);
-            getCurrentPosition(callbackContext, options);
-        } else if (BackgroundGeolocationService.ACTION_BEGIN_BACKGROUND_TASK.equalsIgnoreCase(action)) {
+            getCurrentPosition(callbackContext, data.getJSONObject(0));
+        } else if (BackgroundGeolocation.ACTION_WATCH_POSITION.equalsIgnoreCase(action)) {
+            result = true;
+            watchPosition(callbackContext, data.getJSONObject(0));
+        } else if (BackgroundGeolocation.ACTION_STOP_WATCH_POSITION.equalsIgnoreCase(action)) {
+            result = true;
+            stopWatchPosition(callbackContext);
+        } else if (BackgroundGeolocation.ACTION_BEGIN_BACKGROUND_TASK.equalsIgnoreCase(action)) {
             // Android doesn't do background-tasks.  This is an iOS thing.  Just return a number.
             result = true;
             callbackContext.success(1);
-        } else if (BackgroundGeolocationService.ACTION_CLEAR_DATABASE.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_DESTROY_LOCATIONS.equalsIgnoreCase(action)) {
             result = true;
-            clearDatabase(callbackContext);
+            destroyLocations(callbackContext);
         } else if (ACTION_ADD_HTTP_LISTENER.equalsIgnoreCase(action)) {
             result = true;
             addHttpListener(callbackContext);
+        } else if (ACTION_ADD_HEARTBEAT_LISTENER.equalsIgnoreCase(action)) {
+            result = true;
+            addHeartbeatListener(callbackContext);
+        } else if (ACTION_ADD_ACTIVITY_CHANGE_LISTENER.equalsIgnoreCase(action)) {
+            result = true;
+            addActivityChangeListener(callbackContext);
+        } else if (ACTION_ADD_PROVIDER_CHANGE_LISTENER.equalsIgnoreCase(action)) {
+            result = true;
+            addProviderChangeListener(callbackContext);
+        } else if (ACTION_ADD_SCHEDULE_LISTENER.equalsIgnoreCase(action)) {
+            result = true;
+            addScheduleListener(callbackContext);
         } else if (ACTION_GET_LOG.equalsIgnoreCase(action)) {
             result = true;
             getLog(callbackContext);
         } else if (ACTION_EMAIL_LOG.equalsIgnoreCase(action)) {
             result = true;
             emailLog(callbackContext, data.getString(0));
-        } else if (BackgroundGeolocationService.ACTION_INSERT_LOCATION.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_INSERT_LOCATION.equalsIgnoreCase(action)) {
             result = true;
             insertLocation(data.getJSONObject(0), callbackContext);
-        } else if (BackgroundGeolocationService.ACTION_GET_COUNT.equalsIgnoreCase(action)) {
+        } else if (BackgroundGeolocation.ACTION_GET_COUNT.equalsIgnoreCase(action)) {
             result = true;
             getCount(callbackContext);
+        } else if (BackgroundGeolocation.ACTION_DESTROY_LOG.equalsIgnoreCase(action)) {
+            result = true;
+            destroyLog(callbackContext);
+        } else if (BackgroundGeolocation.ACTION_GET_SENSORS.equalsIgnoreCase(action)) {
+            result = true;
+            getSensors(callbackContext);
         }
         return result;
     }
 
-    private void configure(JSONObject config, CallbackContext callbackContext) {
-        mConfig = config;
-        boolean result = applyConfig();
-        if (result) {
-            boolean willEnable = settings.getBoolean("enabled", isEnabled);
-            if (willEnable) {
-                start(null);
+    private void configure(final JSONObject config, final CallbackContext callbackContext) {
+        final TSCallback callback = new TSCallback() {
+            public void success(Object state) {
+                callbackContext.success((JSONObject) state);
             }
-            PluginResult response = new PluginResult(PluginResult.Status.OK, this.getState());
-            response.setKeepCallback(false);
-            callbackContext.sendPluginResult(response);
-        } else {
-            callbackContext.error("- Configuration error!");
-        }
-    }
-
-    private void start(CallbackContext callback) {
-        isStarting = true;
-        startCallback = callback;
-        backgroundServiceIntent = new Intent(cordova.getActivity(), BackgroundGeolocationService.class);
+            public void error(Object error) {
+                callbackContext.error("Configure failed");
+            }
+        };
         if (hasPermission(ACCESS_COARSE_LOCATION) && hasPermission(ACCESS_FINE_LOCATION)) {
-            setEnabled(true);
+            getAdapter().configure(config, callback);
         } else {
-            String[] permissions = {ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION};
-            requestPermissions(REQUEST_ACTION_START, permissions);
+            requestPermissions(REQUEST_ACTION_CONFIGURE, new TSCallback() {
+                @Override
+                public void success(Object o) {
+                    getAdapter().configure(config, callback);
+                }
+
+                @Override
+                public void error(Object o) {
+                    getAdapter().configure(config, callback);
+                }
+            });
         }
     }
 
-    private void stop() {
-        startCallback = null;
-        isStarting = false;
-        setEnabled(false);
-    }
-
-    private void changePace(CallbackContext callbackContext, JSONArray data) throws JSONException {
-        paceChangeCallback = callbackContext;
-        Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_CHANGE_PACE);
-        event.putBoolean("request", true);
-        event.putBoolean("isMoving", data.getBoolean(0));
-        postEvent(event);
-    }
-    private void startService(int requestCode) {
-        if (hasPermission(ACCESS_FINE_LOCATION) && hasPermission(ACCESS_COARSE_LOCATION)) {
-            Activity activity = cordova.getActivity();
-            if (backgroundServiceIntent == null) {
-                backgroundServiceIntent = new Intent(activity, BackgroundGeolocationService.class);
+    private void start(final CallbackContext callbackContext) {
+        final TSCallback callback = new TSCallback() {
+            public void success(Object state) {
+                callbackContext.success(Settings.getState());
             }
-            activity.startService(backgroundServiceIntent);
+            public void error(Object error) {
+                callbackContext.error((String) error);
+            }
+        };
+
+        if (hasPermission(ACCESS_COARSE_LOCATION) && hasPermission(ACCESS_FINE_LOCATION)) {
+            getAdapter().start(callback);
         } else {
-            String[] permissions = {ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION};
-            requestPermissions(requestCode, permissions);
+            requestPermissions(REQUEST_ACTION_START, new TSCallback() {
+                @Override
+                public void success(Object o) {
+                    getAdapter().start(callback);
+                }
+
+                @Override
+                public void error(Object o) {
+                    callbackContext.error((Integer) o);
+                }
+            });
         }
     }
 
-    private void onStarted(Bundle event) {
-        isStarting = false;
-        if (event.getBoolean("response") && !event.getBoolean("success")) {
-            Toast.makeText(cordova.getActivity(), event.getString("message"), Toast.LENGTH_LONG).show();
-            if (startCallback != null) {
-                startCallback.error(event.getString("message"));
-            }
-        } else if (startCallback != null) {
-            startCallback.success();
-        }
-        startCallback = null;
-    }
-
-    private void getLocations(CallbackContext callbackContext) {
-        final Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_GET_LOCATIONS);
-        event.putBoolean("request", true);
-        getLocationsCallback = callbackContext;
-        postEventInBackground(event);
-    }
-
-    private void getCount(CallbackContext callbackContext) {
-        final Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_GET_COUNT);
-        event.putBoolean("request", true);
-        getCountCallbacks.add(callbackContext);
-        postEventInBackground(event);
-    }
-
-    private void sync(CallbackContext callbackContext) {
-        syncCallback = callbackContext;
-        Activity activity = this.cordova.getActivity();
-
-        EventBus eventBus = EventBus.getDefault();
-        if (!eventBus.isRegistered(this)) {
-            eventBus.register(this);
-        }
-        if (!BackgroundGeolocationService.isInstanceCreated()) {
-            Intent syncIntent = new Intent(activity, BackgroundGeolocationService.class);
-            syncIntent.putExtra("command", BackgroundGeolocationService.ACTION_SYNC);
-            activity.startService(syncIntent);
+    private void startSchedule(CallbackContext callbackContext) {
+        if (getAdapter().startSchedule()) {
+            callbackContext.success();
         } else {
-            final Bundle event = new Bundle();
-            event.putString("name", BackgroundGeolocationService.ACTION_SYNC);
-            event.putBoolean("request", true);
-            postEventInBackground(event);
-        }    
+            callbackContext.error("Failed to start schedule.  Did you configure a #schedule?");
+        }
     }
 
-    private void getCurrentPosition(CallbackContext callbackContext, JSONObject options) {
-        isAcquiringCurrentPosition = true;
-        addCurrentPositionListener(callbackContext);
+    private void stopSchedule(CallbackContext callback) {
+        getAdapter().stopSchedule();
+        callback.success();
+    }
 
-        if (!isEnabled) {
-            EventBus eventBus = EventBus.getDefault();
-            if (!eventBus.isRegistered(this)) {
-                eventBus.register(this);
-            }
-            if (!BackgroundGeolocationService.isInstanceCreated()) {
-                Activity activity = cordova.getActivity();
-                backgroundServiceIntent = new Intent(activity, BackgroundGeolocationService.class);
-                backgroundServiceIntent.putExtra("command", BackgroundGeolocationService.ACTION_GET_CURRENT_POSITION);
-                backgroundServiceIntent.putExtra("options", options.toString());
-                startService(REQUEST_ACTION_GET_CURRENT_POSITION);
-            }
+    private class StartGeofencesCallback implements TSCallback {
+        private CallbackContext mCallbackContext;
+        public StartGeofencesCallback(CallbackContext callbackContext) {
+            mCallbackContext = callbackContext;
+        }
+        @Override
+        public void success(Object state) {
+            mCallbackContext.success((JSONObject) state);
+        }
+        @Override
+        public void error(Object error) {
+            mCallbackContext.error((Integer) error);
+        }
+    }
+
+    private void startGeofences(final CallbackContext callback) {
+        if (hasPermission(ACCESS_COARSE_LOCATION) && hasPermission(ACCESS_FINE_LOCATION)) {
+            getAdapter().startGeofences(new StartGeofencesCallback(callback));
         } else {
-            final Bundle event = new Bundle();
-            event.putString("name", BackgroundGeolocationService.ACTION_GET_CURRENT_POSITION);
-            event.putBoolean("request", true);
-            event.putString("options", options.toString());
-            postEventInBackground(event);
+            requestPermissions(REQUEST_ACTION_START_GEOFENCES, new TSCallback() {
+                @Override
+                public void success(Object o) {
+                    getAdapter().startGeofences(new StartGeofencesCallback(callback));
+                }
+
+                @Override
+                public void error(Object o) {
+                    callback.error((Integer) o);
+                }
+            });
         }
     }
 
-    private void addGeofence(CallbackContext callbackContext, JSONObject config) {
-        try {
-            String identifier = config.getString("identifier");
-            final Bundle event = new Bundle();
-            event.putString("name", BackgroundGeolocationService.ACTION_ADD_GEOFENCE);
-            event.putBoolean("request", true);
-            event.putFloat("radius", (float) config.getLong("radius"));
-            event.putDouble("latitude", config.getDouble("latitude"));
-            event.putDouble("longitude", config.getDouble("longitude"));
-            event.putString("identifier", identifier);
+    private void stop(CallbackContext callbackContext) {
+        locationAuthorizationCallbacks.clear();
+        getAdapter().stop(new StopCallback(callbackContext));
+    }
 
-            if (config.has("notifyOnEntry")) {
-                event.putBoolean("notifyOnEntry", config.getBoolean("notifyOnEntry"));
+    private class StopCallback implements TSCallback {
+        private CallbackContext mCallbackContext;
+        public StopCallback(CallbackContext callback) {
+            mCallbackContext = callback;
+        }
+        @Override
+        public void success(Object state) {
+            mCallbackContext.success((JSONObject) state);
+        }
+        @Override
+        public void error(Object error) {
+            mCallbackContext.error((String) error);
+        }
+    }
+    private void changePace(final CallbackContext callbackContext, JSONArray data) throws JSONException {
+        TSCallback callback = new TSCallback() {
+            public void success(Object result) {
+                callbackContext.success((JSONObject)result);
             }
-            if (config.has("notifyOnExit")) {
-                event.putBoolean("notifyOnExit", config.getBoolean("notifyOnExit"));
+            public void error(Object result) {
+                callbackContext.error((Integer) result);
             }
-            if (config.has("notifyOnDwell")) {
-                event.putBoolean("notifyOnDwell", config.getBoolean("notifyOnDwell"));
-            }
-            if (config.has("loiteringDelay")) {
-                event.putInt("loiteringDelay", config.getInt("loiteringDelay"));
-            }
-            addGeofenceCallbacks.put(identifier, callbackContext);
+        };
+        getAdapter().changePace(data.getBoolean(0), callback);
+    }
 
-            postEvent(event);
-            
-        } catch (JSONException e) {
-            e.printStackTrace();
-            callbackContext.error(e.getMessage());
+    private void getLocations(final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            public void success(Object result) {
+                try {
+                    JSONObject params = new JSONObject();
+                    params.put("locations", result);
+                    params.put("taskId", 0);
+                    callbackContext.success(params);
+                } catch (JSONException e) {
+                    callbackContext.error(e.getMessage());
+                    e.printStackTrace();
+                }
+            }
+            public void error(Object error) {
+                callbackContext.error((String) error);
+            }
+        };
+        getAdapter().getLocations(callback);
+    }
+
+    private void getCount(final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            @Override
+            public void success(Object count) {
+                callbackContext.success((Integer) count);
+            }
+            @Override
+            public void error(Object error) {
+                callbackContext.error((String) error);
+            }
+        };
+        getAdapter().getCount(callback);
+    }
+
+    private void sync(final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            public void success(Object result) {
+                try {
+                    JSONObject params = new JSONObject();
+                    params.put("locations", result);
+                    params.put("taskId", 0);
+                    callbackContext.success(params);
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                    callbackContext.error(e.getMessage());
+                }
+            }
+            public void error(Object error) {
+                callbackContext.error((String)error);
+            }
+        };
+        getAdapter().sync(callback);
+    }
+
+    private void getCurrentPosition(final CallbackContext callbackContext, final JSONObject options) {
+        final TSCallback callback = new TSCallback() {
+            public void success(Object location) {
+                callbackContext.success((JSONObject)location);
+            }
+            public void error(Object error) {
+                callbackContext.error((Integer) error);
+            }
+        };
+
+        if (hasPermission(ACCESS_COARSE_LOCATION) && hasPermission(ACCESS_FINE_LOCATION)) {
+            getAdapter().getCurrentPosition(options, callback);
+        } else {
+            requestPermissions(REQUEST_ACTION_GET_CURRENT_POSITION, new TSCallback() {
+                @Override
+                public void success(Object o) {
+                    getAdapter().getCurrentPosition(options, callback);
+                }
+                @Override
+                public void error(Object o) {
+                    callbackContext.error((Integer) o);
+                }
+            });
         }
     }
 
-    private void addGeofences(CallbackContext callbackContext, JSONArray geofences) {
-        
-        final Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_ADD_GEOFENCES);            
-        event.putBoolean("request", true);
+    private void watchPosition(final CallbackContext callbackContext, final JSONObject options) {
 
-        event.putString("geofences", geofences.toString());
-        addGeofenceCallbacks.put(BackgroundGeolocationService.ACTION_ADD_GEOFENCES, callbackContext);
+        final TSCallback callback = new TSCallback() {
+            public void success(Object location) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) location);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            public void error(Object error) {
+                callbackContext.error((Integer) error);
+            }
+        };
 
-        postEvent(event);
+        if (hasPermission(ACCESS_COARSE_LOCATION) && hasPermission(ACCESS_FINE_LOCATION)) {
+            watchPositionCallbacks.add(callbackContext);
+            getAdapter().watchPosition(options, callback);
+        } else {
+            requestPermissions(REQUEST_ACTION_WATCH_POSITION, new TSCallback() {
+                @Override
+                public void success(Object o) {
+                    watchPositionCallbacks.add(callbackContext);
+                    getAdapter().watchPosition(options, callback);
+                }
+
+                @Override
+                public void error(Object o) {
+                    callbackContext.error((Integer) o);
+                }
+            });
+        }
     }
 
-    private void getGeofences(CallbackContext callbackContext) {
-        getGeofencesCallback = callbackContext;
-        Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_GET_GEOFENCES);
-        event.putBoolean("request", true);
-        postEventInBackground(event);
+    private void stopWatchPosition(CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            public void success(Object result) {}
+            public void error(Object error) {}
+        };
+        getAdapter().stopWatchPosition(callback);
+
+        JSONArray callbackIds = new JSONArray();
+        Iterator<CallbackContext> iterator = watchPositionCallbacks.iterator();
+        while (iterator.hasNext()) {
+            CallbackContext cb = iterator.next();
+            callbackIds.put(cb.getCallbackId());
+            iterator.remove();
+        }
+        callbackContext.success(callbackIds);
+    }
+
+    private void addGeofence(final CallbackContext callbackContext, JSONObject config) {
+        TSCallback callback = new TSCallback() {
+            public void success(Object result) {
+                callbackContext.success((String)result);
+            }
+            public void error(Object error) {
+                callbackContext.error((String)error);
+            }
+        };
+        getAdapter().addGeofence(config, callback);
+    }
+
+    private void addGeofences(final CallbackContext callbackContext, JSONArray geofences) {
+        TSCallback callback = new TSCallback() {
+            public void success(Object result) {
+                callbackContext.success();
+            }
+            public void error(Object result) {
+                callbackContext.error((String) result);
+            }
+        };
+        getAdapter().addGeofences(geofences, callback);
+    }
+
+    private void getGeofences(final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            public void success(Object result) {
+                callbackContext.success((JSONArray) result);
+            }
+            public void error(Object result) {
+                callbackContext.error((String) result);
+            }
+        };
+        getAdapter().getGeofences(callback);
     }
     private void getOdometer(CallbackContext callbackContext) {
-        Float value = settings.getFloat("odometer", 0);
-        PluginResult result = new PluginResult(PluginResult.Status.OK, value);
+        PluginResult result = new PluginResult(PluginResult.Status.OK, getAdapter().getOdometer());
         callbackContext.sendPluginResult(result);
     }
 
-    private void resetOdometer(CallbackContext callbackContext) {
-        SharedPreferences.Editor editor = settings.edit();
-        editor.putFloat("odometer", 0);
-        editor.apply();
+    private void setOdometer(Float value, final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            public void success(Object result) {
+                callbackContext.success((JSONObject) result);
+            }
+            public void error(Object result) {
+                callbackContext.error((String) result);
+            }
+        };
+        getAdapter().setOdometer(value, callback);
+    }
 
-        if (BackgroundGeolocationService.isInstanceCreated()) {
-            Bundle event = new Bundle();
-            event.putString("name", BackgroundGeolocationService.ACTION_RESET_ODOMETER);
-            event.putBoolean("request", true);
-            postEventInBackground(event);
+    private class AddListenerCallback implements TSCallback {
+        private CallbackContext mCallbackContext;
+        public AddListenerCallback(CallbackContext callbackContext) {
+            mCallbackContext = callbackContext;
         }
+        @Override
+        public void success(Object event) {
+            PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) event);
+            result.setKeepCallback(true);
+            mCallbackContext.sendPluginResult(result);
+        }
+        @Override
+        public void error(Object error) {
+            PluginResult result = new PluginResult(PluginResult.Status.ERROR, (String) error);
+            result.setKeepCallback(true);
+            mCallbackContext.sendPluginResult(result);
+        }
+    }
+
+    private void addListener(String event, CallbackContext callbackContext) {
+        TSCallback tsCallback = new AddListenerCallback(callbackContext);
+        if (!getAdapter().on(event, tsCallback)) {
+            callbackContext.error("[CDVBackgroundGeolocation addListener] Unknown event " + event);
+        }
+    }
+
+    private void removeListeners(CallbackContext callbackContext) {
+        getAdapter().removeListeners();
         callbackContext.success();
     }
 
-    private void onResetOdometer(Bundle event) {
-        // Received event from BackgroundService.  Do Nothing.  Callback already callced in #resetOdometer.
+    private void addGeofenceListener(final CallbackContext callbackContext) {
+        getAdapter().on(BackgroundGeolocation.EVENT_GEOFENCE, (new TSCallback() {
+            @Override
+            public void success(Object params) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) params);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            @Override
+            public void error(Object error) {
+                PluginResult result = new PluginResult(PluginResult.Status.ERROR, (String) error);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+        }));
     }
 
-    private void onAddGeofence(Bundle event) {
-        boolean success = event.getBoolean("success");
-        String identifier = event.getString("identifier");
+    private void addHeartbeatListener(final CallbackContext callbackContext) {
+        getAdapter().on(BackgroundGeolocation.EVENT_HEARTBEAT, (new TSCallback() {
+            @Override
+            public void success(Object params) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) params);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            @Override
+            public void error(Object error) {
+                PluginResult result = new PluginResult(PluginResult.Status.ERROR, (String) error);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+        }));
+    }
 
-        if (addGeofenceCallbacks.containsKey(identifier)) {
-            CallbackContext callbackContext = addGeofenceCallbacks.get(identifier);
-            if (success) {
+    private void addActivityChangeListener(final CallbackContext callbackContext) {
+        getAdapter().on(BackgroundGeolocation.EVENT_ACTIVITYCHANGE, (new TSCallback() {
+            @Override
+            public void success(Object activity) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) activity);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            @Override
+            public void error(Object o) {
+                Log.e(TAG, BackgroundGeolocation.EVENT_ACTIVITYCHANGE + " error: " + o);
+            }
+        }));
+    }
+
+    private void addProviderChangeListener(final CallbackContext callbackContext) {
+        getAdapter().on(BackgroundGeolocation.EVENT_PROVIDERCHANGE, (new TSCallback() {
+            @Override
+            public void success(Object state) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) state);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            @Override
+            public void error(Object o) {
+                Log.e(TAG,BackgroundGeolocation.EVENT_PROVIDERCHANGE + " error: " + o);
+            }
+        }));
+    }
+    private void addScheduleListener(final CallbackContext callbackContext) {
+        getAdapter().on(BackgroundGeolocation.EVENT_SCHEDULE, (new TSCallback() {
+            @Override
+            public void success(Object params) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) params);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            @Override
+            public void error(Object o) {
+                PluginResult result = new PluginResult(PluginResult.Status.ERROR, (String) o);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+        }));
+    }
+
+    private void addLocationListener(final CallbackContext callbackContext) {
+        getAdapter().on(BackgroundGeolocation.EVENT_LOCATION, (new TSCallback() {
+            @Override
+            public void success(Object params) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) params);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            @Override
+            public void error(Object errorCode) {
+                Log.e(TAG,BackgroundGeolocation.EVENT_LOCATION + " error: " + errorCode);
+                PluginResult result = new PluginResult(PluginResult.Status.ERROR, (Integer)errorCode);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+        }));
+    }
+
+    private void addMotionChangeListener(final CallbackContext callbackContext) {
+        getAdapter().on(BackgroundGeolocation.EVENT_MOTIONCHANGE, (new TSCallback() {
+            @Override
+            public void success(Object params) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) params);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            @Override
+            public void error(Object o) {
+                Log.e(TAG,BackgroundGeolocation.EVENT_MOTIONCHANGE + " error: " + o);
+                callbackContext.error(BackgroundGeolocation.EVENT_MOTIONCHANGE + ":" + (String) o);
+            }
+        }));
+    }
+
+    private void addHttpListener(final CallbackContext callbackContext) {
+        getAdapter().on(BackgroundGeolocation.EVENT_HTTP, (new TSCallback() {
+            @Override
+            public void success(Object params) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (JSONObject) params);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+            @Override
+            public void error(Object error) {
+                PluginResult result = new PluginResult(PluginResult.Status.ERROR, (JSONObject) error);
+                result.setKeepCallback(true);
+                callbackContext.sendPluginResult(result);
+            }
+        }));
+    }
+
+    private void removeGeofence(String identifier, final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            @Override
+            public void success(Object identifier) {
+                callbackContext.success((String) identifier);
+            }
+            @Override
+            public void error(Object error) {
+                callbackContext.error((String) error);
+            }
+        };
+        getAdapter().removeGeofence(identifier, callback);
+    }
+
+    private void removeGeofences(final JSONArray identifiers, final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            @Override
+            public void success(Object result) {
                 callbackContext.success();
-            } else {
-                callbackContext.error(event.getString("error"));
             }
-            addGeofenceCallbacks.remove(identifier);
+
+            @Override
+            public void error(Object error) {
+                callbackContext.error((String) error);
+            }
+        };
+        getAdapter().removeGeofences(identifiers, callback);
+    }
+
+    private class InsertLocationCallback implements TSCallback {
+        private CallbackContext callbackContext;
+        public InsertLocationCallback(CallbackContext _callbackContext) {
+            callbackContext = _callbackContext;
+        }
+        @Override
+        public void success(Object uuid) {
+            callbackContext.success((String) uuid);
+        }
+        public void error(Object error) {
+            callbackContext.error((String)error);
         }
     }
-
-    private void addGeofenceListener(CallbackContext callbackContext) {
-        geofenceCallbacks.add(callbackContext);
-
-        Activity activity   = this.cordova.getActivity();
-        Intent launchIntent = activity.getIntent();
-        if (launchIntent.hasExtra("forceReload") && launchIntent.hasExtra("geofencingEvent")) {
-            try {
-                JSONObject geofencingEvent  = new JSONObject(launchIntent.getStringExtra("geofencingEvent"));
-                handleGeofencingEvent(geofencingEvent);
-            } catch (JSONException e) {
-                Log.w(TAG, e);
-            }
-        }
-    }
-
-    private void addCurrentPositionListener(CallbackContext callbackContext) {
-        currentPositionCallbacks.add(callbackContext);
-    }
-
-    private void addLocationListener(CallbackContext callbackContext) {
-        locationCallbacks.add(callbackContext);
-    }
-
-    private void addMotionChangeListener(CallbackContext callbackContext) {
-        motionChangeCallbacks.add(callbackContext);
-
-        Activity activity = this.cordova.getActivity();
-        Intent launchIntent = activity.getIntent();
-
-        if (launchIntent.hasExtra("forceReload")) {
-            if (launchIntent.getStringExtra("name").equalsIgnoreCase(BackgroundGeolocationService.ACTION_ON_MOTION_CHANGE)) {
-                Bundle event = launchIntent.getExtras();
-                this.onEventMainThread(event);
-            }
-            launchIntent.removeExtra("forceReload");
-            launchIntent.removeExtra("location");
-        }
-    }
-
-    private void addHttpListener(CallbackContext callbackContext) {
-        httpResponseCallbacks.add(callbackContext);
-    }
-
-    private Boolean removeGeofence(String identifier) {
-        final Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_REMOVE_GEOFENCE);
-        event.putBoolean("request", true);
-        event.putString("identifier", identifier);
-        postEvent(event);
-        return true;
-    }
-
-    private Boolean removeGeofences() {
-        final Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_REMOVE_GEOFENCES);
-        event.putBoolean("request", true);
-        postEvent(event);
-        return true;
-    }
-
     private void insertLocation(JSONObject params, CallbackContext callbackContext) {
-        if (!BackgroundGeolocationService.isInstanceCreated()) {
-            Log.i(TAG, "Cannot insertLocation when the BackgroundGeolocationService is not running.  Plugin must be started first");
-            return;
-        }
-        if (!params.has("uuid")) {
-            callbackContext.error("insertLocation params must contain uuid");
-            return;
-        }
-        if (!params.has("timestamp")) {
-            callbackContext.error("insertLocation params must contain timestamp");
-            return;
-        }
-        if (!params.has("coords")) {
-            callbackContext.error("insertLocation params must contains a coords {}");
-            return;
-        }
-        Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_INSERT_LOCATION);
-        event.putBoolean("request", true);
-
-        try {
-            String uuid = params.getString("uuid");
-            event.putString("location", params.toString());
-            insertLocationCallbacks.put(uuid, callbackContext);
-        } catch (JSONException e) {
-            e.printStackTrace();
-        }
-        postEvent(event);
+        getAdapter().insertLocation(params, new InsertLocationCallback(callbackContext));
     }
-    private void setEnabled(boolean value) {
-        // Don't set a state that we're already in.
-        Log.i(TAG, "- Enable: " + isEnabled + " → " + value);
 
-        Activity activity = cordova.getActivity();
-        boolean wasEnabled = isEnabled;
-        isEnabled = value;
-        isMoving = null;
-
-        Intent launchIntent = activity.getIntent();
-
-        if (launchIntent.hasExtra("forceReload")) {
-            if (launchIntent.hasExtra("location")) {
-                try {
-                    JSONObject location = new JSONObject(launchIntent.getStringExtra("location"));
-                    onLocationChange(location);
-                } catch (JSONException e) {
-                    Log.w(TAG, e);
-                }
+    private void setConfig(final JSONObject config, final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            @Override
+            public void success(Object o) {
+                callbackContext.success(Settings.getState());
             }
+
+            @Override
+            public void error(Object o) {
+                callbackContext.error((String) o);
+            }
+        };
+        getAdapter().setConfig(config, callback);
+    }
+
+    private void destroyLocations(final CallbackContext callbackContext) {
+        TSCallback callback = new TSCallback() {
+            public void success(Object success) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, (Boolean) success);
+                callbackContext.sendPluginResult(result);
+            }
+            public void error(Object error) {
+                callbackContext.error((String) error);
+            }
+        };
+        getAdapter().destroyLocations(callback);
+    }
+
+    private void getLog(CallbackContext callbackContext) {
+        getAdapter().getLog(new GetLogCallback(callbackContext));
+    }
+    private class GetLogCallback implements TSCallback {
+        private CallbackContext callbackContext;
+        public GetLogCallback(CallbackContext _callbackContext) {
+            callbackContext = _callbackContext;
         }
-
-        SharedPreferences.Editor editor = settings.edit();
-        editor.putBoolean("enabled", isEnabled);
-        editor.apply();
-
-        EventBus eventBus = EventBus.getDefault();
-        if (isEnabled) {
-            synchronized(eventBus) {
-                if (!eventBus.isRegistered(this)) {
-                    eventBus.register(this);
-                }
-            }
-            if (!BackgroundGeolocationService.isInstanceCreated()) {
-                activity.startService(backgroundServiceIntent);
-            } else {
-                final Bundle event = new Bundle();
-                if (!wasEnabled) {
-                    event.putString("name", BackgroundGeolocationService.ACTION_START);
-                } else {
-                    event.putString("name", BackgroundGeolocationService.ACTION_GET_CURRENT_POSITION);
-                }
-                event.putBoolean("request", true);
-                postEvent(event);
-                onStarted(event);
-            }
-        } else {
-            Bundle event = new Bundle();
-            event.putString("name", BackgroundGeolocationService.ACTION_STOP);
-            event.putBoolean("request", true);
-            postEvent(event);
-
-            synchronized(eventBus) {
-                if (eventBus.isRegistered(this)) {
-                    eventBus.unregister(this);
-                }
-            }
-            //activity.stopService(backgroundServiceIntent);
-            backgroundServiceIntent = null;
+        @Override
+        public void success(Object log) {
+            callbackContext.success((String) log);
+        }
+        public void error(Object error) {
+            callbackContext.error((String)error);
         }
     }
 
-    private boolean setConfig(JSONObject config) {
-        try {
-            JSONObject merged = new JSONObject();
-            JSONObject[] objs = new JSONObject[] { mConfig, config };
-            for (JSONObject obj : objs) {
-                Iterator it = obj.keys();
-                while (it.hasNext()) {
-                    String key = (String)it.next();
-                    merged.put(key, obj.get(key));
-                }
-            }
-            mConfig = merged;
-        } catch (JSONException e) {
-            e.printStackTrace();
-            return false;
+    private void destroyLog(CallbackContext callbackContext) {
+        getAdapter().destroyLog(new DestroyLogCallback(callbackContext));
+    }
+    private class DestroyLogCallback implements TSCallback {
+        private CallbackContext callbackContext;
+        public DestroyLogCallback(CallbackContext _callbackContext) {
+            callbackContext = _callbackContext;
         }
-
-        cordova.getThreadPool().execute(new Runnable() {
-            public void run() {
-                applyConfig();
-                Bundle event = new Bundle();
-                event.putString("name", BackgroundGeolocationService.ACTION_SET_CONFIG);
-                event.putBoolean("request", true);
-                postEvent(event);
-            }
-        });
-        return true;
+        @Override
+        public void success(Object success) {
+            callbackContext.success((String) success);
+        }
+        public void error(Object error) {
+            callbackContext.error((String)error);
+        }
     }
 
-    private boolean applyConfig() {
-        if (mConfig.has("stopOnTerminate")) {
+    private class EmailLogCallback implements TSCallback {
+        private CallbackContext callbackContext;
+        private String email;
+        public EmailLogCallback(CallbackContext _callbackContext, String _email) {
+            callbackContext = _callbackContext;
+            email = _email;
+        }
+        @Override
+        public void success(Object result) {
+            String log = (String) result;
+
+            Intent mailer = new Intent(Intent.ACTION_SEND);
+            mailer.setType("message/rfc822");
+            mailer.putExtra(Intent.EXTRA_EMAIL, new String[]{email});
+            mailer.putExtra(Intent.EXTRA_SUBJECT, "BackgroundGeolocation log");
+
             try {
-                stopOnTerminate = mConfig.getBoolean("stopOnTerminate");
+                JSONObject state = getState();
+                mailer.putExtra(Intent.EXTRA_TEXT, state.toString(4));
             } catch (JSONException e) {
+                Log.w(TAG, "- Failed to write state to email body");
                 e.printStackTrace();
             }
-        }
-        SharedPreferences.Editor editor = settings.edit();
+            File file = new File(Environment.getExternalStorageDirectory(), "background-geolocation.log.gz");
+            try {
+                FileOutputStream stream = new FileOutputStream(file);
+                try {
+                    // Compresss log
+                    ByteArrayOutputStream os = new ByteArrayOutputStream(log.length());
+                    GZIPOutputStream gos = new GZIPOutputStream(os);
+                    gos.write(log.getBytes());
+                    gos.close();
+                    byte[] compressed = os.toByteArray();
+                    os.close();
 
-        try {
-            if (preferences.contains("cordova-background-geolocation-license")) {
-                mConfig.put("license", preferences.getString("cordova-background-geolocation-license", null));
-            }
-            if (preferences.contains("cordova-background-geolocation-orderId")) {
-                mConfig.put("orderId", preferences.getString("cordova-background-geolocation-orderId", null));
-            }
-            if (mConfig.has("isMoving")) {
-                editor.putBoolean("isMoving", mConfig.getBoolean("isMoving"));
-            }
-        } catch (JSONException e) {
-            e.printStackTrace();
-            Log.w(TAG, "- Failed to apply license");
-        }
-        editor.putString("config", mConfig.toString());
-        editor.apply();
-
-        return true;
-    }
-
-    private void clearDatabase(CallbackContext callbackContext) {
-        final Bundle event = new Bundle();
-        event.putString("name", BackgroundGeolocationService.ACTION_CLEAR_DATABASE);
-        event.putBoolean("request", true);
-        postEventInBackground(event);
-        callbackContext.success();  
-    }
-
-    private String readLog() {
-        try {
-            Process process = Runtime.getRuntime().exec("logcat -d");
-            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-
-            StringBuilder log = new StringBuilder();
-            String line = "";
-            while ((line = bufferedReader.readLine()) != null) {
-                log.append(line + "\n");
-            }
-            return log.toString();
-        }
-        catch (IOException e) {
-            e.printStackTrace();
-            return null;
-        }
-    }
-    private void getLog(final CallbackContext callback) {
-        cordova.getThreadPool().execute(new Runnable() {
-            public void run() {
-                String log = readLog();
-                if (log != null) {
-                    callback.success(log);
-                } else {
-                    callback.error("Failed to read logs");
+                    stream.write(compressed);
+                    stream.close();
+                    mailer.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(file));
+                    file.deleteOnExit();
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
+            } catch (FileNotFoundException e) {
+                Log.i(TAG, "FileNotFound");
+                e.printStackTrace();
             }
-        });
+
+            try {
+                cordova.getActivity().startActivityForResult(Intent.createChooser(mailer, "Send log: " + email + "..."), 1);
+                callbackContext.success();
+            } catch (android.content.ActivityNotFoundException ex) {
+                Toast.makeText(cordova.getActivity(), "There are no email clients installed.", Toast.LENGTH_SHORT).show();
+                callbackContext.error("There are no email clients installed");
+            }
+        }
+        public void error(Object error) {
+            callbackContext.error((String)error);
+        }
     }
+
     private void emailLog(final CallbackContext callback, final String email) {
-        cordova.getThreadPool().execute(new Runnable() {
-            public void run() {
-                String log = readLog();
-                if (log == null) {
-                    callback.error(500);
-                    return;
-                }
-
-                Intent mailer = new Intent(Intent.ACTION_SEND);
-                mailer.setType("message/rfc822");
-                mailer.putExtra(Intent.EXTRA_EMAIL, new String[]{email});
-                mailer.putExtra(Intent.EXTRA_SUBJECT, "BackgroundGeolocation log");
-
-                try {
-                    JSONObject state = getState();
-                    if (state.has("license")) {
-                        state.put("license", "<SECRET>");
-                    }
-                    if (state.has("orderId")) {
-                        state.put("orderId", "<SECRET>");
-                    }
-                    mailer.putExtra(Intent.EXTRA_TEXT, state.toString(4));
-                } catch (JSONException e) {
-                    Log.w(TAG, "- Failed to write state to email body");
-                    e.printStackTrace();
-                }
-                File file = new File(Environment.getExternalStorageDirectory(), "background-geolocation.log");
-                try {
-                    FileOutputStream stream = new FileOutputStream(file);
-                    try {
-                        stream.write(log.getBytes());
-                        stream.close();
-                        mailer.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(file));
-                        file.deleteOnExit();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                } catch (FileNotFoundException e) {
-                    Log.i(TAG, "FileNotFound");
-                    e.printStackTrace();
-                }
-
-                try {
-                    cordova.getActivity().startActivityForResult(Intent.createChooser(mailer, "Send log: " + email + "..."), 1);
-                    callback.success();
-                } catch (android.content.ActivityNotFoundException ex) {
-                    Toast.makeText(cordova.getActivity(), "There are no email clients installed.", Toast.LENGTH_SHORT).show();
-                    callback.error("There are no email clients installed");
-                }
-            }
-        });
+        getAdapter().getLog(new EmailLogCallback(callback, email));
     }
+
     public void onPause(boolean multitasking) {
         Log.i(TAG, "- onPause");
-        if (isEnabled) {
-
-        }
     }
     public void onResume(boolean multitasking) {
         Log.i(TAG, "- onResume");
-        if (isEnabled) {
-
-        }
     }
 
-    /**
-     * EventBus listener for Event Bundle
-     * @param {Bundle} event
-     */
-    @Subscribe
-    public void onEventMainThread(Bundle event) {
-        if (event.containsKey("request")) {
-            return;
-        }
-        String name = event.getString("name");
-
-        if (BackgroundGeolocationService.ACTION_START.equalsIgnoreCase(name)) {
-            onStarted(event);
-        } else if (BackgroundGeolocationService.ACTION_ON_MOTION_CHANGE.equalsIgnoreCase(name)) {
-            boolean nowMoving = event.getBoolean("isMoving");
-            try {
-                JSONObject locationData = new JSONObject(event.getString("location"));
-                onMotionChange(nowMoving, locationData);
-            } catch (JSONException e) {
-                Log.e(TAG, "Error decoding JSON");
-                e.printStackTrace();
-            }
-        } else if (BackgroundGeolocationService.ACTION_GET_LOCATIONS.equalsIgnoreCase(name)) {
-            try {
-                JSONObject params = new JSONObject();
-                params.put("locations", new JSONArray(event.getString("data")));
-                params.put("taskId", "android-bg-task-id");
-                PluginResult result = new PluginResult(PluginResult.Status.OK, params);
-                getLocationsCallback.sendPluginResult(result);
-            } catch (JSONException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-                PluginResult result = new PluginResult(PluginResult.Status.JSON_EXCEPTION, e.getMessage());
-                getLocationsCallback.sendPluginResult(result);
-            }
-        } else if (BackgroundGeolocationService.ACTION_SYNC.equalsIgnoreCase(name)) {
-            Boolean success = event.getBoolean("success");
-            if (success) {
-                try {
-                    JSONObject params       = new JSONObject();
-                    params.put("locations", new JSONArray(event.getString("data")));
-                    params.put("taskId", "android-bg-task-id");
-                    PluginResult result = new PluginResult(PluginResult.Status.OK, params);
-                    syncCallback.sendPluginResult(result);
-                } catch (JSONException e) {
-                    // TODO Auto-generated catch block
-                    e.printStackTrace();
-                }
-            } else {
-                PluginResult result = new PluginResult(PluginResult.Status.IO_EXCEPTION, event.getString("message"));
-                syncCallback.sendPluginResult(result);
-            }
-        } else if (BackgroundGeolocationService.ACTION_RESET_ODOMETER.equalsIgnoreCase(name)) {
-            this.onResetOdometer(event);
-        } else if (BackgroundGeolocationService.ACTION_CHANGE_PACE.equalsIgnoreCase(name)) {
-            this.onChangePace(event);
-        } else if (BackgroundGeolocationService.ACTION_GET_GEOFENCES.equalsIgnoreCase(name)) {
-            try {
-                JSONArray json      = new JSONArray(event.getString("data"));
-                PluginResult result = new PluginResult(PluginResult.Status.OK, json);
-                getGeofencesCallback.sendPluginResult(result);
-            } catch (JSONException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-                PluginResult result = new PluginResult(PluginResult.Status.JSON_EXCEPTION, e.getMessage());
-                getGeofencesCallback.sendPluginResult(result);
-            }
-        } else if (name.equalsIgnoreCase(BackgroundGeolocationService.ACTION_GOOGLE_PLAY_SERVICES_CONNECT_ERROR)) {
-            GoogleApiAvailability.getInstance().getErrorDialog(this.cordova.getActivity(), event.getInt("errorCode"), 1001).show();
-        } else if (name.equalsIgnoreCase(BackgroundGeolocationService.ACTION_LOCATION_ERROR)) {
-            this.onLocationError(event);
-        } else if (name.equalsIgnoreCase(BackgroundGeolocationService.ACTION_ADD_GEOFENCE)) {
-            this.onAddGeofence(event);
-        } else if (name.equalsIgnoreCase(BackgroundGeolocationService.ACTION_ADD_GEOFENCES)) {
-            this.onAddGeofence(event);
-        } else if (name.equalsIgnoreCase(BackgroundGeolocationService.ACTION_HTTP_RESPONSE)) {
-            this.onHttpResponse(event);
-        } else if (name.equalsIgnoreCase(BackgroundGeolocationService.ACTION_GET_CURRENT_POSITION)) {
-            this.onLocationError(event);
-        } else if (name.equalsIgnoreCase(BackgroundGeolocationService.ACTION_INSERT_LOCATION)) {
-            this.onInsertLocation(event);
-        } else if (name.equalsIgnoreCase(BackgroundGeolocationService.ACTION_GET_COUNT)) {
-            this.onGetCount(event);
-        }
-    }
-
-    private void finishAcquiringCurrentPosition(boolean success) {
-        // Current position has arrived:  release the hounds.
-        isAcquiringCurrentPosition = false;
-        // When currentPosition is explicitly requested while plugin is stopped, shut Service down again and stop listening to EventBus
-
-        if (!isEnabled) {
-            EventBus eventBus = EventBus.getDefault();
-            synchronized(eventBus) {
-                if (eventBus.isRegistered(this)) {
-                    eventBus.unregister(this);
-                }
-            }
-        }
-    }
-    public void onHttpResponse(Bundle event) {
-        PluginResult result;
-        try {
-            JSONObject params = new JSONObject();
-            params.put("status", event.getInt("status"));
-            params.put("responseText", event.getString("responseText"));
-            result = new PluginResult(PluginResult.Status.OK, params);
-        } catch (JSONException e) {
-            e.printStackTrace();
-            result = new PluginResult(PluginResult.Status.JSON_EXCEPTION, e.getMessage());
-        }
-        result.setKeepCallback(true);
-        for (CallbackContext callback : httpResponseCallbacks) {
-            callback.sendPluginResult(result);
-        }
-    }
-
-    private void onInsertLocation(Bundle event) {
-        String uuid = event.getString("uuid");
-        Log.i(TAG, "- Cordova plugin: onInsertLocation: " + uuid);
-        if (insertLocationCallbacks.containsKey(uuid)) {
-            CallbackContext callback = insertLocationCallbacks.get(uuid);
-            callback.success();
-        } else {
-            Log.i(TAG, "- onInsertLocation failed to find its success-callback for " + uuid);
-        }
-    }
-
-    private void onGetCount(Bundle event) {
-        int count = event.getInt("count");
-        Log.i(TAG, "- Cordova plugin: getCount: " + count);
-
-        for (CallbackContext callback : getCountCallbacks) {
-            callback.success(count);
-        }
-        getCountCallbacks.clear();
-    }
-
-    private void onMotionChange(boolean nowMoving, JSONObject location) {
-        isMoving = nowMoving;
-        PluginResult result;
-
-        try {
-            JSONObject params = new JSONObject();
-            params.put("location", location);
-            params.put("isMoving", isMoving);
-            params.put("taskId", "android-bg-task-id");
-            result = new PluginResult(PluginResult.Status.OK, params);
-        } catch (JSONException e) {
-            e.printStackTrace();
-            result = new PluginResult(PluginResult.Status.JSON_EXCEPTION, e.getMessage());
-        }
-        result.setKeepCallback(true);
-        for (CallbackContext callback : motionChangeCallbacks) {
-            callback.sendPluginResult(result);
-        }
-    }
-    private void onChangePace(Bundle event) {
-        Boolean success = event.getBoolean("success");
-        if (success) {
-            int state = event.getBoolean("isMoving") ? 1 : 0;
-            paceChangeCallback.success(state);
-        } else {
-            paceChangeCallback.error(event.getInt("code"));
-        }
-    }
     private JSONObject getState() {
-        JSONObject state = new JSONObject();
+        return Settings.getState();
+    }
+
+    private void getSensors(CallbackContext callbackContext) {
+        JSONObject result = new JSONObject();
+        Sensors sensors = Sensors.getInstance(cordova.getActivity().getApplicationContext());
         try {
-            if (settings.contains("config")) {
-                state = new JSONObject(settings.getString("config", "{}"));
-            }
-            state.put("enabled", isEnabled);
-            state.put("isMoving", isMoving);
+            result.put("platform", "android");
+            result.put("accelerometer", sensors.hasAccelerometer());
+            result.put("magnetometer", sensors.hasMagnetometer());
+            result.put("gyroscope", sensors.hasGyroscope());
+            result.put("significant_motion", sensors.hasSignificantMotion());
+            callbackContext.success(result);
         } catch (JSONException e) {
+            callbackContext.error(e.getMessage());
             e.printStackTrace();
         }
-        return state;
-    }
-
-    /**
-     * EventBus listener
-     * @param {Location} location
-     */
-    @Subscribe
-    public void onEventMainThread(Location location) {
-        JSONObject locationData = BackgroundGeolocationService.locationToJson(location, currentActivity);
-
-        Bundle meta = location.getExtras();
-        if (meta != null) {
-            String action = meta.getString("action");
-            boolean motionChanged = action.equalsIgnoreCase(BackgroundGeolocationService.ACTION_ON_MOTION_CHANGE);
-            if (motionChanged) {
-                boolean nowMoving = meta.getBoolean("isMoving");
-                onMotionChange(nowMoving, locationData);
-            }
-        }
-        this.onLocationChange(locationData);
-    }
-    private void onLocationChange(JSONObject location) {
-        PluginResult result = new PluginResult(PluginResult.Status.OK, location);
-        result.setKeepCallback(true);
-        for (CallbackContext callback : locationCallbacks) {
-            callback.sendPluginResult(result);
-        }
-        if (isAcquiringCurrentPosition) {
-            finishAcquiringCurrentPosition(true);
-            // Execute callbacks.
-            result = new PluginResult(PluginResult.Status.OK, location);
-            result.setKeepCallback(false);
-            for (CallbackContext callback : currentPositionCallbacks) {
-                callback.sendPluginResult(result);
-            }
-            currentPositionCallbacks.clear();
-        }
-    }
-    
-    /**
-     * EventBus handler for Geofencing events
-     */
-    @Subscribe
-    public void onEventMainThread(GeofencingEvent geofenceEvent) {
-        Log.i(TAG, "- Rx GeofencingEvent: " + geofenceEvent);
-
-        if (!geofenceCallbacks.isEmpty()) {
-            JSONObject params = BackgroundGeolocationService.geofencingEventToJson(geofenceEvent, currentActivity);
-            handleGeofencingEvent(params);
-        }
-    }
-    private void handleGeofencingEvent(JSONObject params) {
-        PluginResult result = new PluginResult(PluginResult.Status.OK, params);
-        result.setKeepCallback(true);
-        for (CallbackContext callback : geofenceCallbacks) {
-            callback.sendPluginResult(result);
-        }
-    }
-
-    private void playSound(int soundId) {
-        int duration = 1000;
-        toneGenerator = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100);
-        toneGenerator.startTone(soundId, duration);
-    }
-
-    private void postEvent(Bundle event) {
-        EventBus.getDefault().post(event);
-    }
-
-    private void postEventInBackground(final Bundle event) {
-        cordova.getThreadPool().execute(new Runnable() {
-            public void run() {
-                EventBus.getDefault().post(event);
-            }
-        });
-    }
-
-    private Boolean isDebugging() {
-        return settings.contains("debug") && settings.getBoolean("debug", false);
     }
 
     private void onError(String error) {
         String message = "BG Geolocation caught a Javascript exception while running in background-thread:\n".concat(error);
-        Log.e(TAG, message);
+        Log.e(TAG,message);
 
         // Show alert popup with js error
-        if (isDebugging()) {
-            playSound(68);
+        if (Settings.getDebug()) {
+            getAdapter().startTone(BackgroundGeolocation.TONE_ERROR);
             AlertDialog.Builder builder = new AlertDialog.Builder(this.cordova.getActivity());
             builder.setMessage(message)
                     .setCancelable(false)
@@ -1062,36 +943,6 @@ public class CDVBackgroundGeolocation extends CordovaPlugin {
                     });
             AlertDialog alert = builder.create();
             alert.show();
-        }
-    }
-
-    private void onGetCurrentPositionFailure(Bundle event) {
-        finishAcquiringCurrentPosition(false);
-        for (CallbackContext callback : currentPositionCallbacks) {
-            callback.error(408); // aka HTTP 408 Request Timeout
-        }
-        currentPositionCallbacks.clear();
-    }
-
-    private void onLocationError(Bundle event) {
-        Integer code = event.getInt("code");
-        if (code == BackgroundGeolocationService.LOCATION_ERROR_DENIED) {
-            if (isDebugging()) {
-                Toast.makeText(this.cordova.getActivity(), "Location services disabled!", Toast.LENGTH_SHORT).show();
-            }
-        }
-        PluginResult result = new PluginResult(PluginResult.Status.ERROR, code);
-        result.setKeepCallback(true);
-        for (CallbackContext callback : locationCallbacks) {
-            callback.sendPluginResult(result);
-        }
-
-        if (isAcquiringCurrentPosition) {
-            finishAcquiringCurrentPosition(false);
-            for (CallbackContext callback : currentPositionCallbacks) {
-                callback.error(code);
-            }
-            currentPositionCallbacks.clear();
         }
     }
 
@@ -1114,12 +965,13 @@ public class CDVBackgroundGeolocation extends CordovaPlugin {
         return true;
     }
 
-    private void requestPermissions(int requestCode, String[] action) {
+    private void requestPermissions(int requestCode, TSCallback callback) {
         try {
             Method methodToFind = cordova.getClass().getMethod("requestPermissions", CordovaPlugin.class, int.class, String[].class);
             if (methodToFind != null) {
                 try {
-                    methodToFind.invoke(cordova, this, requestCode, action);
+                    methodToFind.invoke(cordova, this, requestCode, LOCATION_PERMISSIONS);
+                    locationAuthorizationCallbacks.add(callback);
                 } catch (IllegalAccessException e) {
                     e.printStackTrace();
                 } catch (InvocationTargetException e) {
@@ -1132,54 +984,38 @@ public class CDVBackgroundGeolocation extends CordovaPlugin {
     }
 
     public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) throws JSONException {
-        for(int r:grantResults) {
-            if(r == PackageManager.PERMISSION_DENIED) {
-                int errorCode = BackgroundGeolocationService.LOCATION_ERROR_DENIED;
-                PluginResult result = new PluginResult(PluginResult.Status.ERROR, errorCode);
-                if (requestCode == REQUEST_ACTION_START) {
-                    if (startCallback != null) {
-                        startCallback.sendPluginResult(result);
-                        startCallback = null;
-                    }
-                } else if (requestCode == REQUEST_ACTION_GET_CURRENT_POSITION) {
-                    Bundle event = new Bundle();
-                    event.putString("name", BackgroundGeolocationService.ACTION_GET_CURRENT_POSITION);
-                    event.putInt("code", errorCode);
-                    onLocationError(event);
-                }
-                return;
+        if (grantResults.length == 0) {
+            Log.w(TAG, "Waiting for location permission result");
+            return;
+        }
+
+        int result = grantResults[0];
+        for (TSCallback callback : locationAuthorizationCallbacks) {
+            if(result == PackageManager.PERMISSION_DENIED) {
+                callback.error(TSLocationManager.LOCATION_ERROR_DENIED);
+            } else {
+                callback.success(requestCode);
             }
         }
-        switch(requestCode)
-        {
-            case REQUEST_ACTION_START:
-                setEnabled(true);
-                break;
-            case REQUEST_ACTION_GET_CURRENT_POSITION:
-                startService(requestCode);
-                break;
-        }
+        locationAuthorizationCallbacks.clear();
     }
 
+    private void onPlayServicesConnectError(Integer errorCode) {
+        Activity activity = cordova.getActivity();
+        GoogleApiAvailability.getInstance().getErrorDialog(activity, errorCode, 1001).show();
+    }
+
+    private BackgroundGeolocation getAdapter() {
+        Activity activity = cordova.getActivity();
+        return BackgroundGeolocation.getInstance(activity.getApplicationContext(), activity.getIntent());
+    }
     /**
      * Override method in CordovaPlugin.
      * Checks to see if it should turn off
      */
     public void onDestroy() {
-        Log.i(TAG, "- onDestroy");
-        Log.i(TAG, "  stopOnTerminate: " + stopOnTerminate);
-        Log.i(TAG, "  isEnabled: " + isEnabled);
-
-        Activity activity = this.cordova.getActivity();
-
-        EventBus eventBus = EventBus.getDefault();
-        synchronized(eventBus) {
-            if (eventBus.isRegistered(this)) {
-                eventBus.unregister(this);
-            }
-        }
-        if(isEnabled && stopOnTerminate) {
-            this.cordova.getActivity().stopService(backgroundServiceIntent);
-        }
+        Log.i(TAG, "CDVBackgroundGeolocation#onDestoy");
+        getAdapter().onActivityDestroy();
+        super.onDestroy();
     }
 }

@@ -12,7 +12,25 @@
 
 @interface LocationManager : NSObject <CLLocationManagerDelegate>
 
+// Location types
+typedef enum tsLocationType : NSInteger {
+    TS_LOCATION_TYPE_MOTIONCHANGE   = 0,
+    TS_LOCATION_TYPE_TRACKING       = 1,
+    TS_LOCATION_TYPE_CURRENT        = 2,
+    TS_LOCATION_TYPE_SAMPLE         = 3,
+    TS_LOCATION_TYPE_WATCH          = 4,
+    TS_LOCATION_TYPE_GEOFENCE       = 5
+} tsLocationtype;
+
+// Error codes
+typedef enum tsLocationError : NSInteger {
+    TS_LOCATION_ERROR_ACCEPTABLE_ACCURACY = 100,
+    TS_LOCATION_ERROR_TIMEOUT = 408
+} tsLocationError;
+
+
 @property (strong, nonatomic) CLLocationManager* locationManager;
+@property (nonatomic, readonly) UIBackgroundTaskIdentifier preventSuspendTask;
 @property (strong, nonatomic) CLLocation* lastLocation;
 @property (strong, nonatomic) CLLocation* bestLocation;
 @property (nonatomic) NSInteger maxLocationAttempts;
@@ -24,8 +42,13 @@
 @property (copy) void (^locationChangedBlock) (LocationManager* manager, CLLocation* location, BOOL isSample);
 @property (copy) void (^errorBlock) (LocationManager* manager, NSError* error);
 
+-(void)watchPosition:(NSDictionary*)options;
+-(void)requestLocation;
+-(void)stopWatchPosition;
 -(void)startUpdatingLocation;
--(void)startUpdatingLocation:(int)samples;
--(void)startUpdatingLocation:(int)samples timeout:(NSTimeInterval)timeout;
+-(void)startUpdatingLocation:(NSInteger)samples;
+-(void)startUpdatingLocation:(NSInteger)samples timeout:(NSTimeInterval)timeout;
+-(void)startUpdatingLocation:(NSInteger)samples timeout:(NSTimeInterval)timeout desiredAccuracy:(CLLocationAccuracy)desiredAccuracy;
 -(void)stopUpdatingLocation;
+
 @end
