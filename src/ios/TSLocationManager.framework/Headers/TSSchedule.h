@@ -21,6 +21,8 @@
 -(TSSchedule*)initWithRecord:(NSString*)data andHandler:(void (^)(TSSchedule*))handler;
 
 -(void)make:(NSDateComponents*)NSDateComponents;
+-(BOOL)isNext:(NSDate*)now;
+-(BOOL)isLiteralDate;
 -(BOOL)hasDay:(NSInteger)day;
 -(BOOL)startsBefore:(NSDate*)now;
 -(BOOL)startsAfter:(NSDate*)now;
@@ -28,6 +30,7 @@
 -(BOOL)endsAfter:(NSDate*)now;
 -(BOOL)expired;
 -(void)trigger:(BOOL)enabled;
+-(void)reset;
 -(void)evaluate;
 
 

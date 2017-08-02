@@ -1,25 +1,49 @@
-[Premium Version (iOS)](http://shop.transistorsoft.com/pages/cordova-background-geolocation-premium)
-==========================
+Cordova Background Geolocation
+===========================================================================
 
-This repo hosts the **iOS** platform available in the **[Premium Version](http://shop.transistorsoft.com/pages/cordova-background-geolocation-premium)**.  **Android** functionality is available only in the **[Premium Version](http://shop.transistorsoft.com/pages/cordova-background-geolocation-premium)**.
+The *most* sophisticated background **location-tracking & geofencing** module with battery-conscious motion-detection intelligence for **iOS** and **Android**.
 
-Background Geolocation
-==============================
+Also available for [React Native](https://github.com/transistorsoft/react-native-background-geolocation), [NativeScript](https://github.com/transistorsoft/nativescript-background-geolocation-lt) and pure native apps.
 
-Cross-platform background geolocation module for Cordova with battery-saving **"circular stationary-region monitoring"** and **"stop detection"**.
+-----------------------------------------------------------------------------
 
-![Home](https://www.dropbox.com/s/4cggjacj68cnvpj/screenshot-iphone5-geofences-framed.png?dl=1)
-![Settings](https://www.dropbox.com/s/mmbwgtmipdqcfff/screenshot-iphone5-settings-framed.png?dl=1)
+:new: The **[Android plugin](http://www.transistorsoft.com/shop/products/cordova-background-geolocation)** requires [purchasing a license](http://www.transistorsoft.com/shop/products/cordova-background-geolocation).  However, it *will* work for **DEBUG** builds.  It will **not** work with **RELEASE** builds [without purchasing a license](http://www.transistorsoft.com/shop/products/cordova-background-geolocation).
 
-## Installing the plugin ##
+-----------------------------------------------------------------------------
+
+![Home](https://www.dropbox.com/s/byaayezphkwn36h/home-framed-350.png?dl=1)
+![Settings](https://www.dropbox.com/s/8lvnpp0gowitagq/settings-framed-350.png?dl=1)
+
+## [:books: API Documentation](./docs/README.md)
+- :wrench: [Configuration Options](./docs/README.md#wrench-configuration-options)
+  + [Geolocation Options](./docs/README.md#wrench-geolocation-options)
+  + [Activity Recognition Options](./docs/README.md#wrench-activity-recognition-options)
+  + [HTTP & Persistence Options](./docs/README.md#wrench-http--persistence-options)
+  + [Geofencing Options](./docs/README.md#wrench-geofencing-options)
+  + [Application Options](./docs/README.md#wrench-application-options)
+- :zap: [Events](./docs/README.md#zap-events)
+- :small_blue_diamond: [Methods](./docs/README.md#large_blue_diamond-methods)
+- :blue_book: Guides
+  + [Philosophy of Operation](../../wiki/Philosophy-of-Operation)
+  + [Geofencing](./docs/geofencing.md)
+  + [HTTP Features](./docs/http.md)
+  + [Location Data Schema](../../wiki/Location-Data-Schema)
+  + [Debugging](../../wiki/Debugging)
+ 
+## :large_blue_diamond: Installing the plugin ##
 
 #### From npm 
+
 ```bash
 $ cordova plugin add cordova-background-geolocation-lt
 ```
+
 #### Phonegap Build
+
 ```xml
-  <plugin name="cordova-background-geolocation-lt" source="npm" />
+  <plugin name="cordova-background-geolocation-lt" source="npm">
+
+  </plugin>
 ```
 
 #### From master (latest, greatest.)
@@ -32,27 +56,131 @@ $ cordova plugin add https://github.com/transistorsoft/cordova-background-geoloc
 
 This plugin has tagged stable versions.  To install a particular version, append a version code to the github url prefixed by `#`.
 
-```
-$ cordova plugin add <git.url>#1.5.0
+```bash
+$ cordova plugin add <git.url>#2.7.0
 ```
 
 ![](https://dl.dropboxusercontent.com/u/2319755/cordova-background-geolocaiton/screenshot-github-tagged-branches.png)
 
-## Using the plugin
+## :large_blue_diamond: Configuring the plugin
 
-The plugin creates the object `window.BackgroundGeolocation`.  See [API Documentation](docs) for details
+The plugin requires configuration within your App's `config.xml`:
 
-## Documentation
-- [API Documentation](docs)
-- [Location Data Schema](../../wiki/Location-Data-Schema)
-- [Error Codes](../../wiki/Location-Error-Codes)
-- [Debugging Sounds](../../wiki/Debug-Sounds)
-- [Geofence Features](../../wiki/Geofence-Features)
-- [Background Tasks](../../wiki/Background-Tasks)
+```xml
+<widget id="com.your.company.app.id">
+  <plugin name="cordova-background-geolocation-lt">
+    <variable name="LOCATION_ALWAYS_USAGE_DESCRIPTION" value="Background location-tracking is required" />
+    <variable name="LOCATION_WHEN_IN_USE_USAGE_DESCRIPTION" value="Background location-tracking is required" />
+    <variable name="MOTION_USAGE_DESCRIPTION" value="Using the accelerometer increases battery-efficiency by intelligently toggling location-tracking only when the device is detected to be moving" />
+    <!-- Android only -->
+    <variable name="LICENSE" value="YOUR_LICENSE_KEY" />
+  </plugin>
+  .
+  .
+  .
+</widget>
+```
 
-## Example
+-----------------------------------------------------------------------------
+
+:warning: To apply changes to these `<variable />`, you **must** remove/re-add the plugin (**append `--nosave` when removing the plugin**)
 
 ```
+$ cordova plugin remove cordova-background-geolocation-lt --nosave
+$ cordova plugin add cordova-background-geolocation-lt
+```
+
+-----------------------------------------------------------------------------
+
+### :large_blue_diamond: Disabling Background "location"
+
+For those using `useSignificantChangesOnly: true`, possibly because Apple *denied* your use of the background `location` capability, you can disable background `location` by providing the `BACKGROUND_MODE_LOCATION` `<variable />` with an empty-string:
+
+```xml
+<plugin name="cordova-background-geolocation-lt">
+  .
+  .
+  .
+  <!-- Disable background "location" capability with empty-string -->
+  <variable name="BACKGROUND_MODE_LOCATION" value="" />
+</plugin>
+```
+
+##### `@variable LOCATION_ALWAYS_USAGE_DESCRIPTION ["Background location-tracking is required"]` iOS
+
+**[iOS]** Customize the message displayed to the user when `Always` location authorization is requested.  This variable is added to your iOS `.plist` in the `NSLocationAlwaysUsageDescription` key.
+
+##### `@variable LOCATION_WHEN_IN_USE_USAGE_DESCRIPTION ["Background location-tracking is required"` iOS
+
+**[iOS]** Customize the message displayed to the user when `WhenInUse` location authorization is requested.  This variable is added to your iOS `.plist` in the `NSLocationWhenInUseUsageDescription` key.
+
+##### `@variable MOTION_USAGE_DESCRIPTION ["Using the accelerometer increases battery-efficiency by..."` iOS
+
+**[iOS]** Customize the message displayed to the user when "Motion & Fitness" permission is requested.  The plugin is **highly** optimized to use iOS `CMMotionActivityManager` API for intelligently toggling location-services only when the plugin is detected to be moving.
+
+##### `@variable BACKGROUND_MODE_LOCATION ["&lt;string&gt;location&lt;/string&gt;"]` iOS
+**[iOS]** Adds the iOS background-mode `location` to your iOS `.plist` file.  This is the default behaviour.  To disable this, (ie: for those using `useSignificantChangesOnly`), provide an empty-string:
+
+```xml
+  <variable name="BACKGROUND_MODE_LOCATION" value="" />
+```
+
+**WARNING** If you *do* want the default behaviour of background-location updates, simply **IGNORE** this variable -- Do **NOT** even provide it.  If you *do* provide it, you must provide the full escaped XML value of `&lt;string&gt;location&lt;/string&gt;` (the default value when not provided), not just `location`.
+
+
+## :large_blue_diamond: Using the Plugin
+
+The plugin creates the object **`window.BackgroundGeolocation`**.  See [API Documentation](docs) for details
+
+### Ionic 2 and Typescript
+
+[Sample Implementation](https://gist.github.com/christocracy/2abf5587cc12b83e15aa12958de7a7d2)
+
+```javascript
+platform.ready().then(() => {
+  var bgGeo = (<any>window).BackgroundGeolocation;
+});
+
+```
+
+### `#configure` the Plugin
+There are **three** simple steps to using `BackgroundGeolocation`:
+
+1. Listen to events
+2. `#configure` the plugin
+3. `#start` the plugin
+
+```javascript
+// 1.  Listen to events
+bgGeo.on('location', onLocation, onLocationFailure);
+bgGeo.on('motionchange', onMotionChange);
+bgGeo.on('providerchange', onProviderChange);
+
+// 2. Configure the plugin.  
+bgGeo.configure({
+  desiredAccuracy: 0,   // <-- Config params
+  distanceFilter: 50
+}, function(state) {    // <-- Current state provided to #configure callback
+  // 3.  Start tracking
+  console.log('BackgroundGeolocation is configured and ready to use');
+  if (!state.enabled) {
+    bgGeo.start(function() {
+      console.log('- BackgroundGeolocation tracking started');
+    });
+  }
+});
+// NOTE:  Do NOT execute any API methods until the callback to #configure
+// method above executes!
+// For example, do not do this here:
+// bgGeo.getCurrentPosition()   // <-- NO!
+// bgGeo.getState();            // <-- NO!
+```
+
+:warning: Do not execute *any* API method (aside from `#getState` or adding event-listeners with `#on`) *before* the `callbackFn` to the `#configure` method fires, as noted above.
+
+## :large_blue_diamond: Example
+
+```javascript
 
 ////
 // As with all Cordova plugins, you must configure within an #deviceready callback.
@@ -60,7 +188,6 @@ The plugin creates the object `window.BackgroundGeolocation`.  See [API Document
 function onDeviceReady() {
     // Get a reference to the plugin.
     var bgGeo = window.BackgroundGeolocation;
-    
 
     //This callback will be executed every time a geolocation is recorded in the background.
     var callbackFn = function(location, taskId) {
@@ -68,7 +195,7 @@ function onDeviceReady() {
         var lat    = coords.latitude;
         var lng    = coords.longitude;
         console.log('- Location: ', JSON.stringify(location));
-        
+
         // Must signal completion of your callbackFn.
         bgGeo.finish(taskId);
     };
@@ -80,10 +207,19 @@ function onDeviceReady() {
 
     // Listen to location events & errors.
     bgGeo.on('location', callbackFn, failureFn);
-
     // Fired whenever state changes from moving->stationary or vice-versa.
     bgGeo.on('motionchange', function(isMoving) {
       console.log('- onMotionChange: ', isMoving);
+    });
+    // Fired whenever a geofence transition occurs.
+    bgGeo.on('geofence', function(geofence) {
+      console.log('- onGeofence: ', geofence.identifier, geofence.location);
+    });
+    // Fired whenever an HTTP response is received from your server.
+    bgGeo.on('http', function(response) {
+      console.log('http success: ', response.responseText);
+    }, function(response) {
+      console.log('http failure: ', response.status);
     });
 
     // BackgroundGeoLocation is highly configurable.
@@ -91,34 +227,28 @@ function onDeviceReady() {
         // Geolocation config
         desiredAccuracy: 0,
         distanceFilter: 10,
-        stationaryRadius: 50,
-        locationUpdateInterval: 1000,
-        fastestLocationUpdateInterval: 5000,
-
+        stationaryRadius: 25,
         // Activity Recognition config
-        activityType: 'AutomotiveNavigation',
-        activityRecognitionInterval: 5000,
+        activityRecognitionInterval: 10000,
         stopTimeout: 5,
-
         // Application config
-        debug: true,
+        debug: true,  // <-- Debug sounds & notifications.
         stopOnTerminate: false,
         startOnBoot: true,
-
         // HTTP / SQLite config
-        url: 'http://posttestserver.com/post.php?dir=cordova-background-geolocation',
-        method: 'POST',
+        url: "http://your.server.com/locations",
+        method: "POST",
         autoSync: true,
-        maxDaysToPersist: 1,
-        headers: {
+        maxDaysToPersist: 3,
+        headers: {  // <-- Optional HTTP headers
             "X-FOO": "bar"
         },
-        params: {
+        params: {   // <-- Optional HTTP params
             "auth_token": "maybe_your_server_authenticates_via_token_YES?"
         }
     }, function(state) {
         // This callback is executed when the plugin is ready to use.
-        console.log('BackgroundGeolocation ready: ', state);
+        console.log("BackgroundGeolocation ready: ", state);
         if (!state.enabled) {
             bgGeo.start();
         }
@@ -136,24 +266,8 @@ function onDeviceReady() {
 
 ```
 
-## Help!  It doesn't work!
 
-Yes it does.  [See the Wiki](https://github.com/transistorsoft/cordova-background-geolocation-lt/wiki)
-
-- on iOS, background tracking won't be engaged until you travel about **2-3 city blocks**, so go for a walk or car-ride (or use the Simulator with ```Debug->Location->City Drive```)
-- When in doubt, **nuke everything**:  First delete the app from your device (or simulator)
-
-```
-$ cordova plugin remove com.transistorsoft.cordova.background-geolocation
-$ cordova plugin add git@github.com:transistorsoft/cordova-background-geolocation-lt.git
-
-$ cordova platform remove ios
-$ cordova platform add ios
-$ cordova build ios
-
-```
-
-## [Advanced Sample Application](https://github.com/christocracy/cordova-background-geolocation-SampleApp)
+## :large_blue_diamond: [Advanced Sample Application](https://github.com/christocracy/cordova-background-geolocation-SampleApp)
 
 A fully-featured [SampleApp](https://github.com/christocracy/cordova-background-geolocation-SampleApp) is available in its own public repo.  After first cloning that repo, follow the installation instructions in the **README** there.  This SampleApp includes a settings-screen allowing you to quickly experiment with all the different settings available for each platform.
 
@@ -161,7 +275,7 @@ If you're using XCode, boot the SampleApp in the iOS Simulator and enable ```Deb
 
 ![](https://dl.dropboxusercontent.com/u/2319755/cordova-background-geolocaiton/simulate-location.png)
 
-## Simple Testing Server
+## :large_blue_diamond: Simple Testing Server
 
 A simple Node-based [web-application](https://github.com/transistorsoft/background-geolocation-console) with SQLite database is available for field-testing and performance analysis.  If you're familiar with Node, you can have this server up-and-running in about **one minute**.
 
@@ -170,32 +284,8 @@ A simple Node-based [web-application](https://github.com/transistorsoft/backgrou
 ![](https://dl.dropboxusercontent.com/u/2319755/cordova-background-geolocaiton/background-geolocation-console-grid.png)
 
 
+# Licence
 
-## Behaviour
-
-The plugin has features allowing you to control the behaviour of background-tracking, striking a balance between accuracy and battery-usage.  In stationary-mode, the plugin attempts to descrease its power usage and accuracy by setting up a circular stationary-region of configurable #stationaryRadius.  
-
-iOS has a nice system  [Significant Changes API](https://developer.apple.com/library/ios/documentation/CoreLocation/Reference/CLLocationManager_Class/CLLocationManager/CLLocationManager.html#//apple_ref/occ/instm/CLLocationManager/startMonitoringSignificantLocationChanges), which allows the os to suspend your app until a cell-tower change is detected (typically 2-3 city-block change) 
-
-Android automatically detects when the device is moving so has no need for a stationary-geofence.
-
-The plugin will execute your configured ```callback``` provided to the ```#configure(callback, config)``` method.  Both iOS & Android use a SQLite database to persist **every** recorded geolocation so you don't have to worry about persistence when no network is detected.  The plugin provides a Javascript API to fetch and destroy the records in the database.  In addition, the plugin has an optional HTTP layer allowing allowing you to automatically HTTP POST recorded geolocations to your server.
-
-The function ```changePace(isMoving, success, failure)``` is provided to force the plugin to enter "moving" or "stationary" state.
-
-## iOS
-
-The plugin uses iOS Significant Changes API, and starts triggering your configured ```callback``` only when a cell-tower switch is detected (i.e. the device exits stationary radius). 
-
-When the plugin detects the device has moved beyond its configured #stationaryRadius, it engages the native platform's geolocation system for aggressive monitoring according to the configured `#desiredAccuracy`, `#distanceFilter`.  The plugin attempts to intelligently scale `#distanceFilter` based upon the current reported speed.  Each time `#distanceFilter` is determined to have changed by 5m/s, it recalculates it by squaring the speed rounded-to-nearest-five and adding #distanceFilter (I arbitrarily came up with that formula.  Better ideas?).
-
-  `(round(speed, 5))^2 + distanceFilter`
-
-## Android
-
-Using the [ActivityRecognition API](https://developer.android.com/reference/com/google/android/gms/location/ActivityRecognitionApi.html) provided by [Google Play Services](https://developer.android.com/google/play-services/index.html), Android will constantly monitor [the nature](https://developer.android.com/reference/com/google/android/gms/location/DetectedActivity.html) of the device's movement at a sampling-rate configured by `#activityRecognitionInterval`.  When the plugin sees a DetectedActivity of [STILL](https://developer.android.com/reference/com/google/android/gms/location/DetectedActivity.html), location-updates will be halted -- when it sees `IN_VEHICLE, ON_BICYCLE, ON_FOOT, RUNNING, WALKING`, location-updates will be initiated.
-
-## Licence ##
 ```
 cordova-background-geolocation
 Copyright (c) 2015, Transistor Software (9224-2932 Quebec Inc)

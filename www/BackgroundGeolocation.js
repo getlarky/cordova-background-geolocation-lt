@@ -1,3 +1,4 @@
+
 /**
 * cordova-background-geolocation
 * Copyright (c) 2015, Transistor Software (9224-2932 Quebec Inc)
@@ -7,7 +8,33 @@
 * @see LICENSE
 */
 var exec = require("cordova/exec");
+var MODULE_NAME = "BackgroundGeolocation";
+
 module.exports = {
+    LOG_LEVEL_OFF: 0,
+    LOG_LEVEL_ERROR: 1,
+    LOG_LEVEL_WARNING: 2,
+    LOG_LEVEL_INFO: 3,
+    LOG_LEVEL_DEBUG: 4,
+    LOG_LEVEL_VERBOSE: 5,
+
+    DESIRED_ACCURACY_HIGH: 0,
+    DESIRED_ACCURACY_MEDIUM: 10,
+    DESIRED_ACCURACY_LOW: 100,
+    DESIRED_ACCURACY_VERY_LOW: 1000,
+
+    AUTHORIZATION_STATUS_NOT_DETERMINED: 0,
+    AUTHORIZATION_STATUS_RESTRICTED: 1,
+    AUTHORIZATION_STATUS_DENIED: 2,
+    AUTHORIZATION_STATUS_ALWAYS: 3,
+    AUTHORIZATION_STATUS_WHEN_IN_USE: 4,
+
+    NOTIFICATION_PRIORITY_DEFAULT: 0,
+    NOTIFICATION_PRIORITY_HIGH: 1,
+    NOTIFICATION_PRIORITY_LOW: -1,
+    NOTIFICATION_PRIORITY_MAX: 2,
+    NOTIFICATION_PRIORITY_MIN: -2,
+
     /**
     * @property {Object} stationaryLocation
     */
@@ -30,6 +57,12 @@ module.exports = {
                 return this.onHeartbeat(success, fail);
             case 'schedule':
                 return this.onSchedule(success, fail);
+            case 'activitychange':
+                return this.onActivityChange(success, fail);
+            case 'providerchange':
+                return this.onProviderChange(success, fail);
+            case 'geofenceschange':
+                return this.onGeofencesChange(success, fail);
         }
     },
 
@@ -47,38 +80,38 @@ module.exports = {
         }
         config = config || {};
         this.config = config;
-        
+
         exec(success || function() {},
              failure || function() {},
-             'BackgroundGeolocation',
+             MODULE_NAME,
              'configure',
              [config]
         );
-        // Detect if BackgroundFetch plugin is available and provide a default configuration for it too,
-        //  otherwise the fetchCompletionHander will never be called and iOS will kill your app.
-        if (window.BackgroundFetch && !window.BackgroundFetch.config) {
-            this.configureBackgroundFetch(config);
-        }
     },
-    configureBackgroundFetch: function(config) {
-        var Fetch = window.BackgroundFetch;
-        
-        var callback = function() {
-            // Give it 10s before finish.
-            setTimeout(function() {
-                Fetch.finish();
-            }, 10000);
-        };
-        var failure = function() {};
-
-        Fetch.configure(callback, failure, {
-            stopOnTerminate: config.stopOnTerminate || true
-        });
+    removeListeners: function(success, failure) {
+        success = success || function(){};
+        failure = failure || function(){};
+        var re = /^BackgroundGeolocation.*/;
+        var mySuccess = function(response) {
+            var callbacks = window.cordova.callbacks;
+            for (var callbackId in callbacks) {
+                if (callbacks.hasOwnProperty(callbackId) && callbackId.match(re)) {
+                    delete callbacks[callbackId];
+                }
+            }
+            success(response);
+        }
+        exec(mySuccess,
+             failure,
+             MODULE_NAME,
+             'removeListeners',
+             []
+        );
     },
     getState: function(success, failure) {
         exec(success || function() {},
              failure || function() {},
-             'BackgroundGeolocation',
+             MODULE_NAME,
              'getState',
              []
         );
@@ -86,65 +119,72 @@ module.exports = {
     start: function(success, failure, config) {
         exec(success || function() {},
              failure || function() {},
-             'BackgroundGeolocation',
+             MODULE_NAME,
              'start',
              []);
+    },
+    stop: function(success, failure, config) {
+        exec(success || function() {},
+            failure || function() {},
+            MODULE_NAME,
+            'stop',
+            []);
     },
     startSchedule: function(success, failure) {
         exec(success || function() {},
              failure || function() {},
-             'BackgroundGeolocation',
+             MODULE_NAME,
              'startSchedule',
              []);
     },
     stopSchedule: function(success, failure) {
         exec(success || function() {},
              failure || function() {},
-             'BackgroundGeolocation',
+             MODULE_NAME,
              'stopSchedule',
              []);
     },
-    stop: function(success, failure, config) {
+    startGeofences: function(success, failure) {
         exec(success || function() {},
-            failure || function() {},
-            'BackgroundGeolocation',
-            'stop',
-            []);
+             failure || function() {},
+             MODULE_NAME,
+             'startGeofences',
+             []);
     },
-    beginBackgroundTask: function(callback) {
+    startBackgroundTask: function(callback) {
         if (typeof(callback) !== 'function') {
-            throw "beginBackgroundTask must be provided with a callbackFn to receive the returned #taskId";
+            throw "startBackgroundTask must be provided with a callbackFn to receive the returned #taskId";
         }
         exec(callback,
             function() {},
-            'BackgroundGeolocation',
-            'beginBackgroundTask',
+            MODULE_NAME,
+            'startBackgroundTask',
             []);
     },
     finish: function(taskId, success, failure) {
-        if (!taskId) {
-            throw "BackgroundGeolocation#finish must now be provided with a taskId as 1st param, eg: bgGeo.finish(taskId).  taskId is provided by 2nd param in callback";
+        if ((typeof(taskId) !== 'number') || taskId === 0) {
+            return;
         }
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'finish',
             [taskId]);
     },
     error: function(taskId, message) {
-        if (!taskId) {
+        if (typeof(taskId) !== 'number') {
             throw "BackgroundGeolocation#error must now be provided with a taskId as 1st param, eg: bgGeo.finish(taskId).  taskId is provided by 2nd param in callback";
         }
         exec(function() {},
             function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'error',
             [taskId, message]);
     },
     changePace: function(isMoving, success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'changePace',
             [isMoving]);
     },
@@ -159,7 +199,7 @@ module.exports = {
         this._apply(this.config, config);
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'setConfig',
             [config]);
     },
@@ -169,7 +209,7 @@ module.exports = {
     getStationaryLocation: function(success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'getStationaryLocation',
             []);
     },
@@ -177,11 +217,11 @@ module.exports = {
         if (typeof(success) !== 'function') {
             throw "A callback must be provided";
         }
-        
+
         var me = this;
         var mySuccess = function(params) {
             var location    = params.location || params;
-            var taskId      = params.taskId || 'task-id-undefined';
+            var taskId      = params.taskId || 0;
             // Transform timestamp to Date instance.
             if (location.timestamp) {
                 location.timestamp = new Date(location.timestamp);
@@ -192,7 +232,7 @@ module.exports = {
         }
         exec(mySuccess,
              failure || function() {},
-             'BackgroundGeolocation',
+             MODULE_NAME,
              'addLocationListener',
              []
         );
@@ -210,12 +250,12 @@ module.exports = {
         var callback = function(params) {
             var isMoving    = params.isMoving;
             var location    = params.location;
-            var taskId      = params.taskId || 'task-id-undefined';
-            
+            var taskId      = params.taskId || 0;
+
             if (!isMoving) {
                 me.stationaryLocation = location;
             }
-            
+
             // Transform timestamp to Date instance.
             if (location.timestamp) {
                 location.timestamp = new Date(location.timestamp);
@@ -227,21 +267,42 @@ module.exports = {
         };
         exec(callback,
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'addMotionChangeListener',
             []);
+    },
+    onActivityChange: function(success) {
+        exec(success || function() {},
+            function() {},
+            MODULE_NAME,
+            'addActivityChangeListener',
+            []);
+    },
+    onProviderChange: function(success) {
+        exec(success || function() {},
+            function() {},
+            MODULE_NAME,
+            'addProviderChangeListener',
+            []);
+    },
+    onGeofencesChange: function(success) {
+        exec(success || function() {},
+            function() {},
+            MODULE_NAME,
+            'addListener',
+            ['geofenceschange']);
     },
     onHeartbeat: function(success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'addHeartbeatListener',
             []);
     },
     onSchedule: function(success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'addScheduleListener',
             []);
     },
@@ -259,23 +320,27 @@ module.exports = {
         }
         exec(mySuccess,
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'getLocations',
             []);
     },
     getCount: function(success, failure) {
         exec(success||function(){},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'getCount',
-            []);  
+            []);
     },
+    // @deprecated
     clearDatabase: function(success, failure) {
+        this.destroyLocations(success, failure);
+    },
+    destroyLocations: function(success, failure) {
         exec(success||function(){},
             failure || function() {},
-            'BackgroundGeolocation',
-            'clearDatabase',
-            []);  
+            MODULE_NAME,
+            'destroyLocations',
+            []);
     },
     insertLocation: function(location, success, failure) {
         location = location || {};
@@ -285,7 +350,7 @@ module.exports = {
         }
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'insertLocation',
             [location]);
     },
@@ -307,21 +372,21 @@ module.exports = {
         }
         exec(mySuccess,
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'sync',
             []);
     },
     onHttp: function(success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'addHttpListener',
             []);
     },
     onLog: function(success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'addLogListener',
             []);
     },
@@ -331,7 +396,7 @@ module.exports = {
     getOdometer: function(success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'getOdometer',
             []);
     },
@@ -341,10 +406,18 @@ module.exports = {
     resetOdometer: function(success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
-            'resetOdometer',
-            []);
+            MODULE_NAME,
+            'setOdometer',
+            [0]);
     },
+    setOdometer: function(value, success, failure) {
+        exec(success || function() {},
+            failure || function() {},
+            MODULE_NAME,
+            'setOdometer',
+            [value]);
+    },
+
     /**
     * add geofence
     */
@@ -355,7 +428,7 @@ module.exports = {
         }
         if (!(config.latitude && config.longitude)) {
             throw "#addGeofence requires a #latitude and #longitude";
-        } 
+        }
         if (!config.radius) {
             throw "#addGeofence requires a #radius";
         }
@@ -364,7 +437,7 @@ module.exports = {
         }
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'addGeofence',
             [config]);
     },
@@ -375,19 +448,28 @@ module.exports = {
         geofences = geofences || [];
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'addGeofences',
             [geofences]);
     },
     /**
     * Remove all geofences
     */
-    removeGeofences: function(success, failure) {
+    removeGeofences: function(identifiers, success, failure) {
+        if (arguments.length === 0) {
+            identifiers = [];
+            success = function() {};
+            failure = function() {};
+        } else if (typeof(identifiers) === 'function') {
+            failure = success;
+            success = identifiers;
+            identifiers = [];
+        }
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'removeGeofences',
-            []);  
+            [identifiers]);
     },
     /**
     * remove a geofence
@@ -399,7 +481,7 @@ module.exports = {
         }
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'removeGeofence',
             [identifier]);
     },
@@ -409,16 +491,13 @@ module.exports = {
         }
         var me = this;
         var mySuccess = function(params) {
-            var taskId = params.taskId || 'task-id-undefined';
+            var taskId = 0;  // <-- taskId removed from geofence event in 2.5.1
             delete(params.taskId);
-
-            me._runBackgroundTask(taskId, function() {
-                success.call(me, params, taskId);
-            }, failure);
+            success.call(me, params, taskId);
         };
         exec(mySuccess,
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'onGeofence',
             []);
     },
@@ -428,7 +507,7 @@ module.exports = {
     getGeofences: function(success, failure) {
         exec(success || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'getGeofences',
             []);
     },
@@ -443,7 +522,7 @@ module.exports = {
         };
         var mySuccess = function(params) {
             var location    = params.location || params;
-            var taskId      = params.taskId || 'task-id-undefined';
+            var taskId      = params.taskId || 0;
             // Transform timestamp to Date instance.
             if (location.timestamp) {
                 location.timestamp = new Date(location.timestamp);
@@ -454,29 +533,97 @@ module.exports = {
         }
         exec(mySuccess || function() {},
             failure || function() {},
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'getCurrentPosition',
             [options]);
+    },
+    watchPosition: function(success, failure, options) {
+        var me = this;
+        options = options || {};
+        success = success || function(location) {};
+        var mySuccess = function(location) {
+            // Transform timestamp to Date instance.
+            if (location.timestamp) {
+                location.timestamp = new Date(location.timestamp);
+            }
+            success(location);
+        }
+        exec(mySuccess || function() {},
+            failure || function() {},
+            MODULE_NAME,
+            'watchPosition',
+            [options]);
+    },
+    stopWatchPosition: function(success, failure, options) {
+        var success = success || function() {};
+        var failure = failure || function() {};
+
+        var mySuccess = function(watchCallbacks) {
+            var callbacks = window.cordova.callbacks;
+            for (var n=0,len=watchCallbacks.length;n<len;n++) {
+                var callbackId = watchCallbacks[n];
+                if (callbacks[callbackId]) {
+                    delete callbacks[callbackId];
+                } else {
+                    console.warn(MODULE_NAME + '#stopWatchPosition failed to locate callbackId: ', callbackId);
+                }
+            }
+            success();
+        };
+        exec(mySuccess,
+            failure,
+            MODULE_NAME,
+            'stopWatchPosition',
+        []);
+    },
+    setLogLevel: function(logLevel, success, failure) {
+       var success = success || function() {};
+       var failure = failure || function() {};
+       exec(success,
+            failure,
+            MODULE_NAME,
+            'setLogLevel',
+            [logLevel]);
     },
     getLog: function(success, failure) {
         var success = success || function() {};
         var failure = failure || function() {};
         exec(success,
             failure,
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'getLog',
-            []); 
+            []);
+    },
+    destroyLog: function(success, failure) {
+        var success = success || function() {};
+        var failure = failure || function() {};
+        exec(success,
+            failure,
+            MODULE_NAME,
+            'destroyLog',
+            []);
     },
     emailLog: function(email, success, failure) {
         var success = success || function() {};
         var failure = failure || function() {};
         exec(success,
             failure,
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'emailLog',
-            [email]); 
+            [email]);
     },
-
+    /**
+    * Fetch list of available sensors: accelerometer, gyroscope, magnetometer
+    */
+    getSensors: function(success, failure) {
+        var success = success || function() {};
+        var failure = failure || function() {};
+        exec(success,
+            failure,
+            MODULE_NAME,
+            'getSensors',
+            []);  
+    },
     /**
     * Play a system sound.  This is totally experimental.
     * iOS http://iphonedevwiki.net/index.php/AudioServices
@@ -487,9 +634,9 @@ module.exports = {
         var failure = function() {};
         exec(success,
             failure,
-            'BackgroundGeolocation',
+            MODULE_NAME,
             'playSound',
-            [soundId]);  
+            [soundId]);
     },
 
     _setTimestamp: function(rs) {
@@ -528,3 +675,4 @@ module.exports = {
         return destination;
     }
 };
+
